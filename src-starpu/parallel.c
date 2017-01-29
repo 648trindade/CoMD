@@ -72,6 +72,7 @@ void initParallel(int* argc, char*** argv)
    int ret = starpu_init(NULL);
    if (ret == -ENODEV)
       exit(77);
+   STARPU_CHECK_RETURN_VALUE(ret, "starpu_init");
 }
 
 void destroyParallel()

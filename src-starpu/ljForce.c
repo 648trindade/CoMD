@@ -170,67 +170,89 @@ int ljForce(SimFlat* s)
    int nNbrBoxes = 27;
 
    // Handle for s->boxes->nAtoms
-    data_handle *nAtoms_handle = create_and_registar_data_handle(
-        s->boxes->nAtoms,
-        s->boxes->nTotalBoxes,
-        sizeof(int)
-    );
+   data_handle *nAtoms_handle = create_and_register_vector_handle(
+      s->boxes->nAtoms,
+      s->boxes->nTotalBoxes,
+      sizeof(int)
+   );
 
-    // Handle for s->atoms->r
-    data_handle *r_handle = create_and_registar_data_handle(
-        s->atoms->r,
-        fSize,
-        sizeof(real3)
-    );
+   // Handle for s->atoms->r
+   data_handle *r_handle = create_and_register_vector_handle(
+      s->atoms->r,
+      fSize,
+      sizeof(real3)
+   );
 
     // Handle for s->atoms->f
-    data_handle *f_handle = create_and_registar_data_handle(
-        s->atoms->f,
-        fSize,
-        sizeof(real3)
-    );
+   data_handle *f_handle = create_and_register_vector_handle(
+      s->atoms->f,
+      fSize,
+      sizeof(real3)
+   );
 
     // Handle for s->atoms->U
-    data_handle *U_handle = create_and_registar_data_handle(
-        s->atoms->U,
-        fSize,
-        sizeof(real_t)
-    );
+   data_handle *U_handle = create_and_register_vector_handle(
+      s->atoms->U,
+      fSize,
+      sizeof(real_t)
+   );
+
+    // Handle for ePot
+   data_handle *ePot_handle = create_and_register_variable_handle(
+        &ePot,
+        sizeof(ePot)
+   );
+
+   // Handle array for future unregistration and deallocation (line 252)
+   data_handle* created_handles[5 + s->boxes->nLocalBoxes];
+   created_handles[0] = nAtoms_handle;
+   created_handles[1] = r_handle;
+   created_handles[2] = f_handle;
+   created_handles[3] = U_handle;
+   created_handles[4] = ePot_handle;
 
    // loop over local boxes
    //#pragma omp parallel for reduction(+:ePot)
    for (int iBox=0; iBox<s->boxes->nLocalBoxes; iBox++)
    {
-        struct params params = {
-            .s6 = s6, 
-            .eShift = eShift, 
-            .ePot = &ePot, 
-            .epsilon = epsilon, 
-            .rCut2 = rCut2, 
-            .iBox = iBox,
-            .nNbrBoxes = nNbrBoxes
-        };
+      // coração do laço retirado e movido pra starpu_code.c:cpu_func()
 
-        // Handle for s->boxes->nbrBoxes[iBox]
-        data_handle *jBoxes_handle = create_and_registar_data_handle(
-            s->boxes->nbrBoxes[iBox],
-            nNbrBoxes,
-            sizeof(s->boxes->nbrBoxes[iBox][0])
-        );
+      // copia paramêtros
+      struct params params = {
+         .s6 = s6, 
+         .eShift = eShift,
+         .epsilon = epsilon, 
+         .rCut2 = rCut2, 
+         .iBox = iBox,
+         .nNbrBoxes = nNbrBoxes
+      };
 
-        data_handle* handles[] = {
-            jBoxes_handle,
-            nAtoms_handle,
-            r_handle,
-            f_handle,
-            U_handle
-        };
+      // Handle for s->boxes->nbrBoxes[iBox]
+      data_handle *jBoxes_handle = create_and_register_vector_handle(
+         s->boxes->nbrBoxes[iBox],
+         nNbrBoxes,
+         sizeof(s->boxes->nbrBoxes[iBox][0])
+      );
 
-        create_and_start_task(handles, 5, &params, sizeof(params));
+      // copy new handle to handle array
+      created_handles[5 + iBox] = jBoxes_handle;
 
-        comdFree(jBoxes_handle);
+      // create a short handle array for task use
+      data_handle* handles[] = {
+         jBoxes_handle,
+         nAtoms_handle,
+         r_handle,
+         f_handle,
+         U_handle,
+         ePot_handle
+      };
 
+      // create the task for current iteration
+      create_and_start_task(handles, &params, sizeof(params));
    } // loop over local boxes in system
+
+   // Unregister all data handles and free memory (and wait for tasks)
+   unregister_and_destroy_data_handles(created_handles, 5 + s->boxes->nLocalBoxes);
 
    ePot = ePot*4.0*epsilon;
    s->ePotential = ePot;
