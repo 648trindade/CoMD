@@ -19,3 +19,10 @@
 # Doxygen directories
 src-mpi/html
 src-mpi/latex
+
+# Generated source
+src-*/.depend
+src-*/CoMD_info.h
+
+bin/
+.vscode/
