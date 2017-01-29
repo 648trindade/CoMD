@@ -5,12 +5,16 @@
 #define _MEMUTILS_H_
 
 #include <stdlib.h>
+#include <starpu.h>
 
 #define freeMe(s,element) {if(s->element) comdFree(s->element);  s->element = NULL;}
 
 static void* comdMalloc(size_t iSize)
 {
-   return malloc(iSize);
+   //return malloc(iSize);
+   void *ptr = NULL;
+   starpu_malloc(&ptr, iSize);
+   return ptr;
 }
 
 static void* comdCalloc(size_t num, size_t iSize)
@@ -25,6 +29,7 @@ static void* comdRealloc(void* ptr, size_t iSize)
 
 static void comdFree(void *ptr)
 {
-   free(ptr);
+   //free(ptr);
+   starpu_free(ptr);
 }
 #endif
