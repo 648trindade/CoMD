@@ -1,0 +1,101 @@
+In file included from /usr/local/include/starpu/1.2/starpu.h:45:0,
+                 from ljForce.c:68:
+/usr/local/include/starpu/1.2/starpu_thread.h:204:9: error: unknown type name ‘pthread_rwlock_t’
+ typedef pthread_rwlock_t starpu_pthread_rwlock_t;
+         ^~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_thread.h:205:9: error: unknown type name ‘pthread_rwlockattr_t’
+ typedef pthread_rwlockattr_t starpu_pthread_rwlockattr_t;
+         ^~~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_thread.h:255:9: error: unknown type name ‘pthread_barrier_t’
+ typedef pthread_barrier_t starpu_pthread_barrier_t;
+         ^~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_thread.h:256:9: error: unknown type name ‘pthread_barrierattr_t’
+ typedef pthread_barrierattr_t starpu_pthread_barrierattr_t;
+         ^~~~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_thread_util.h: In function ‘_starpu_pthread_rwlock_tryrdlock’:
+/usr/local/include/starpu/1.2/starpu_thread.h:218:41: warning: implicit declaration of function ‘pthread_rwlock_tryrdlock’ [-Wimplicit-function-declaration]
+ #define starpu_pthread_rwlock_tryrdlock pthread_rwlock_tryrdlock
+                                         ^
+/usr/local/include/starpu/1.2/starpu_thread_util.h:213:14: note: in expansion of macro ‘starpu_pthread_rwlock_tryrdlock’
+  int p_ret = starpu_pthread_rwlock_tryrdlock(rwlock);
+              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_thread_util.h: In function ‘_starpu_pthread_rwlock_trywrlock’:
+/usr/local/include/starpu/1.2/starpu_thread.h:220:41: warning: implicit declaration of function ‘pthread_rwlock_trywrlock’ [-Wimplicit-function-declaration]
+ #define starpu_pthread_rwlock_trywrlock pthread_rwlock_trywrlock
+                                         ^
+/usr/local/include/starpu/1.2/starpu_thread_util.h:238:14: note: in expansion of macro ‘starpu_pthread_rwlock_trywrlock’
+  int p_ret = starpu_pthread_rwlock_trywrlock(rwlock);
+              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /usr/local/include/starpu/1.2/starpu.h:65:0,
+                 from ljForce.c:68:
+/usr/local/include/starpu/1.2/starpu_profiling.h: At top level:
+/usr/local/include/starpu/1.2/starpu_profiling.h:36:18: error: field ‘submit_time’ has incomplete type
+  struct timespec submit_time;
+                  ^~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:38:18: error: field ‘push_start_time’ has incomplete type
+  struct timespec push_start_time;
+                  ^~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:39:18: error: field ‘push_end_time’ has incomplete type
+  struct timespec push_end_time;
+                  ^~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:40:18: error: field ‘pop_start_time’ has incomplete type
+  struct timespec pop_start_time;
+                  ^~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:41:18: error: field ‘pop_end_time’ has incomplete type
+  struct timespec pop_end_time;
+                  ^~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:43:18: error: field ‘acquire_data_start_time’ has incomplete type
+  struct timespec acquire_data_start_time;
+                  ^~~~~~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:44:18: error: field ‘acquire_data_end_time’ has incomplete type
+  struct timespec acquire_data_end_time;
+                  ^~~~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:46:18: error: field ‘start_time’ has incomplete type
+  struct timespec start_time;
+                  ^~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:47:18: error: field ‘end_time’ has incomplete type
+  struct timespec end_time;
+                  ^~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:49:18: error: field ‘release_data_start_time’ has incomplete type
+  struct timespec release_data_start_time;
+                  ^~~~~~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:50:18: error: field ‘release_data_end_time’ has incomplete type
+  struct timespec release_data_end_time;
+                  ^~~~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:52:18: error: field ‘callback_start_time’ has incomplete type
+  struct timespec callback_start_time;
+                  ^~~~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:53:18: error: field ‘callback_end_time’ has incomplete type
+  struct timespec callback_end_time;
+                  ^~~~~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:65:18: error: field ‘start_time’ has incomplete type
+  struct timespec start_time;
+                  ^~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:66:18: error: field ‘total_time’ has incomplete type
+  struct timespec total_time;
+                  ^~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:67:18: error: field ‘executing_time’ has incomplete type
+  struct timespec executing_time;
+                  ^~~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:68:18: error: field ‘sleeping_time’ has incomplete type
+  struct timespec sleeping_time;
+                  ^~~~~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:78:18: error: field ‘start_time’ has incomplete type
+  struct timespec start_time;
+                  ^~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h:79:18: error: field ‘total_time’ has incomplete type
+  struct timespec total_time;
+                  ^~~~~~~~~~
+/usr/local/include/starpu/1.2/starpu_profiling.h: In function ‘starpu_timespec_clear’:
+/usr/local/include/starpu/1.2/starpu_profiling.h:116:5: error: dereferencing pointer to incomplete type ‘struct timespec’
+  tsp->tv_sec = 0;
+     ^~
+/usr/local/include/starpu/1.2/starpu_profiling.h: In function ‘starpu_timespec_sub’:
+/usr/local/include/starpu/1.2/starpu_profiling.h:154:20: error: dereferencing pointer to incomplete type ‘const struct timespec’
+  result->tv_sec = a->tv_sec - b->tv_sec;
+                    ^~
+ljForce.c: In function ‘ljForce’:
+ljForce.c:259:9: warning: ignoring return value of ‘starpu_task_submit’, declared with attribute warn_unused_result [-Wunused-result]
+         starpu_task_submit(task);
+         ^~~~~~~~~~~~~~~~~~~~~~~~
+make: *** [ljForce.o] Error 1
