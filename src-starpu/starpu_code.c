@@ -18,6 +18,22 @@ starpu_data_handle_t* create_and_register_vector_handle(void* data, int NX, int 
 }
 
 // create and register a handle for a variable
+starpu_data_handle_t* create_and_register_matrix_handle(void* var, int width, int height, int size){
+    starpu_data_handle_t *handle = comdMalloc(sizeof(starpu_data_handle_t));
+    memset(handle, 0, sizeof(starpu_data_handle_t));
+    starpu_matrix_data_register(
+        handle,
+        STARPU_MAIN_RAM,
+        (uintptr_t)var,
+        width,
+        width,
+        height,
+        size
+    );
+    return handle;
+}
+
+// create and register a handle for a variable
 starpu_data_handle_t* create_and_register_variable_handle(void* var, int size){
     starpu_data_handle_t *handle = comdMalloc(sizeof(starpu_data_handle_t));
     memset(handle, 0, sizeof(starpu_data_handle_t));

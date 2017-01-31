@@ -4,6 +4,8 @@
 
 starpu_data_handle_t* create_and_register_vector_handle(void* data, int NX, int elem_size);
 
+starpu_data_handle_t* create_and_register_matrix_handle(void* data, int width, int height, int size);
+
 starpu_data_handle_t* create_and_register_variable_handle(void* var, int size);
 
 void unregister_and_destroy_data_handles(starpu_data_handle_t* handles[], int num_handles);

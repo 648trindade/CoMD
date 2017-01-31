@@ -177,17 +177,19 @@ int ljForce(SimFlat* s)
    );
 
    // Handle for s->atoms->r
-   starpu_data_handle_t *r_handle = create_and_register_vector_handle(
+   starpu_data_handle_t *r_handle = create_and_register_matrix_handle(
       s->atoms->r,
       fSize,
-      sizeof(real3)
+      3,
+      sizeof(real_t)
    );
 
     // Handle for s->atoms->f
-   starpu_data_handle_t *f_handle = create_and_register_vector_handle(
+   starpu_data_handle_t *f_handle = create_and_register_matrix_handle(
       s->atoms->f,
       fSize,
-      sizeof(real3)
+      3,
+      sizeof(real_t)
    );
 
     // Handle for s->atoms->U
@@ -231,21 +233,33 @@ int ljForce(SimFlat* s)
    /* Set the methods to define neutral elements and to perform the reduction operation */
    starpu_data_set_reduction_methods(*ePot_handle, &ePot_redux_codelet, &ePot_init_codelet);
 
+   struct params* params_created = comdMalloc(sizeof(struct params) * s->boxes->nLocalBoxes);
+   // copia paramêtros
+   struct params params_base = {
+      .s6 = s6, 
+      .eShift = eShift,
+      .epsilon = epsilon, 
+      .rCut2 = rCut2,
+      .nNbrBoxes = nNbrBoxes
+   };
+
+   // codelet definition
+   struct starpu_codelet cl = {
+      .cpu_funcs = { cpu_func },
+      .cpu_funcs_name = { "cpu_func" },
+      .nbuffers = 6,
+      .modes = {STARPU_R, STARPU_R, STARPU_R, STARPU_RW, STARPU_RW, STARPU_REDUX}
+      //        boxes,    nAtoms,   atoms->r, atoms->f,  atoms->U,  ePot
+   };
+
    // loop over local boxes
    //#pragma omp parallel for reduction(+:ePot)
    for (int iBox=0; iBox<s->boxes->nLocalBoxes; iBox++)
    {
       // coração do laço retirado e movido pra cpu_func()
-
-      // copia paramêtros
-      struct params params = {
-         .s6 = s6, 
-         .eShift = eShift,
-         .epsilon = epsilon, 
-         .rCut2 = rCut2, 
-         .iBox = iBox,
-         .nNbrBoxes = nNbrBoxes
-      };
+      struct params *params = &params_created[iBox];
+      *params = params_base;
+      params->iBox = iBox;
 
       // Handle for s->boxes->nbrBoxes[iBox]
       starpu_data_handle_t *boxes_handle = create_and_register_vector_handle(
@@ -257,22 +271,13 @@ int ljForce(SimFlat* s)
       // copy new handle to handle array
       created_handles[5 + iBox] = boxes_handle;
 
-      // codelet definition
-      struct starpu_codelet cl = {
-         .cpu_funcs = { cpu_func },
-         .cpu_funcs_name = { "cpu_func" },
-         .nbuffers = 6,
-         .modes = {STARPU_R, STARPU_R, STARPU_R, STARPU_RW, STARPU_RW, STARPU_REDUX}
-         //        boxes,    nAtoms,   atoms->r, atoms->f,  atoms->U,  ePot
-      };
-
       // task definition
       struct starpu_task *task = starpu_task_create();
       task->cl = &cl;
-      task->cl_arg = &params;
-      task->cl_arg_size = sizeof(params);
+      task->cl_arg = params;
+      task->cl_arg_size = sizeof(struct params);
       // FIXME: only works with synchrony (SEGFAULT for asynchronous)
-      task->synchronous = 1;
+      //task->synchronous = 1;
       // assign handles to task
       task->handles[0] = *boxes_handle;
       task->handles[1] = *nAtoms_handle;
@@ -289,6 +294,7 @@ int ljForce(SimFlat* s)
    starpu_task_wait_for_all();
    // Unregister all data handles and free memory
    unregister_and_destroy_data_handles(created_handles, 5 + s->boxes->nLocalBoxes);
+   comdFree(params_created);
 
    ePot = ePot*4.0*epsilon;
    s->ePotential = ePot;
