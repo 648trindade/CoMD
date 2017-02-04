@@ -16,10 +16,10 @@ DO_MPI = OFF
 ### own.  If you need any -L or -l switches to get C standard libraries
 ### (such as -lm for the math library) put them in C_LIB.
 CC = gcc
-CFLAGS = -std=gnu99 -fopenmp -I/usr/local/include/starpu/1.2
+CFLAGS = -std=gnu99 -fopenmp $(shell pkg-config --cflags starpu-1.2)
 OPTFLAGS = -g -O3
 INCLUDES = 
-C_LIB = -lpthread -lm -L/usr/local/lib -lstarpu-1.2 -lOpenCL -lhwloc
+C_LIB = -lpthread -lm $(shell pkg-config --libs starpu-1.2)
 
 
 ### If you need to specify include paths, library paths, or link flags
@@ -32,6 +32,11 @@ MPI_INCLUDE =
 OTHER_LIB =
 OTHER_INCLUDE =
 
+
+HAS_CUDA	=	$(shell pkg-config --libs starpu-1.2 |grep -i cuda)
+ifneq ($(strip $(HAS_CUDA)),)
+NVCC = ncc
+endif
 
 
 
@@ -73,11 +78,19 @@ CFLAGS  += ${OPTFLAGS} ${INCLUDES} ${OTHER_INCLUDE}
 SOURCES=$(wildcard *.c)
 OBJECTS=$(SOURCES:.c=.o)
 
+ifneq ($(strip $(HAS_CUDA)),)
+OBJECTS += starpu_code_cuda.o
+endif
 
 DEFAULT: ${CoMD_EXE}
 
 %.o: %.c
 	${CC} ${CFLAGS} -c $< -o $@
+
+ifneq ($(strip $(HAS_CUDA)),)
+%.o: %.cu
+	${NVCC} $(CFLAGS) $< -c
+endif
 
 ${CoMD_EXE}: ${BIN_DIR} CoMD_info.h ${OBJECTS} 
 	${CC} ${CFLAGS} -o ${CoMD_EXE} ${OBJECTS} ${LDFLAGS}
