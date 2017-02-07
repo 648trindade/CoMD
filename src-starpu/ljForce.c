@@ -170,7 +170,7 @@ int ljForce(SimFlat* s)
    int nNbrBoxes = 27;
 
    // Uma task por box / laço
-   NTASKS = 2;//s->boxes->nLocalBoxes;
+   NTASKS = s->boxes->nLocalBoxes;
 
    /* Todo dado registrado por um handle poderá(ia) ser usado sem forçar
       serialização das tasks a partir desse ponto */
@@ -232,7 +232,6 @@ int ljForce(SimFlat* s)
       task->handles[5] = ePot_handle;
 
       // Submete a task assincronamente
-      // FIXME: workers trabalhando serialmente
       int ret = starpu_task_submit(task);
       STARPU_CHECK_RETURN_VALUE(ret, "starpu_task_submit");
    } // loop over local boxes in system
