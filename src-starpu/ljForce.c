@@ -242,12 +242,12 @@ int ljForce(SimFlat* s)
    starpu_data_unpartition(f_handle, STARPU_MAIN_RAM);
 
    // Desregistra todos os handles
-   starpu_data_unregister(nAtoms_handle);
-   starpu_data_unregister(r_handle);
+   starpu_data_unregister_no_coherency(nAtoms_handle);
+   starpu_data_unregister_no_coherency(r_handle);
    starpu_data_unregister(f_handle);
    starpu_data_unregister(U_handle);
    starpu_data_unregister(ePot_handle);
-   starpu_data_unregister(nbrBoxes_handle);
+   starpu_data_unregister_no_coherency(nbrBoxes_handle);
 
    ePot = ePot*4.0*epsilon;
    s->ePotential = ePot;
@@ -347,9 +347,9 @@ void cpu_func(void *buffers[], void *cl_arg){
 void ePot_redux_cpu_func(void *descr[], void *cl_arg)
 {
 	real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
-	real_t *ePot_partial = (real_t *)STARPU_VARIABLE_GET_PTR(descr[1]);
+	real_t *ePot_worker = (real_t *)STARPU_VARIABLE_GET_PTR(descr[1]);
 
-      *ePot = *ePot + *ePot_partial;
+      *ePot = *ePot + *ePot_worker;
 }
 
 void ePot_init_cpu_func(void *descr[], void *cl_arg)
