@@ -58,11 +58,11 @@ static __global__ void do_ljForce(
     return;
 }
 
-static __global__ void cuda_redux(real_t *ePot, real_t *ePot_worker){
-	*ePot = *ePot + *ePot_worker;
-	cudaStreamSynchronize(starpu_cuda_get_local_stream());
-    return;
-}
+// static __global__ void cuda_redux(real_t *ePot, real_t *ePot_worker){
+// 	*ePot = *ePot + *ePot_worker;
+// 	cudaStreamSynchronize(starpu_cuda_get_local_stream());
+//     return;
+// }
 
 extern "C" void cuda_func(void *buffers[], void *cl_arg){
     // Angariando parâmetros
@@ -77,7 +77,7 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
     real3*      r = ( real3*) STARPU_VECTOR_GET_PTR(buffers[2]);
     real3*      f = ( real3*) STARPU_VECTOR_GET_PTR(buffers[3]);
     real_t*     U = (real_t*) STARPU_VECTOR_GET_PTR(buffers[4]);
-    real_t*  ePot = (real_t*) STARPU_VARIABLE_GET_PTR(buffers[5]);
+    real_t*  ePot = (real_t*) STARPU_VECTOR_GET_PTR(buffers[5]);
     
     // Angariando offsets e números de elementos
     size_t nbrBoxes_offset = (size_t) STARPU_VECTOR_GET_OFFSET(buffers[0]);
@@ -91,12 +91,13 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
     STARPU_ASSERT(nbrBoxes_nx % nNbrBoxes == 0);
     STARPU_ASSERT((iOff_offset / sizeof(real_t)) % MAXATOMS == 0);
     STARPU_ASSERT(U_nx % MAXATOMS == 0);
-    STARPU_ASSERT((f_nx / 3) % MAXATOMS == 0);
+    STARPU_ASSERT(f_nx % MAXATOMS == 0);
     
     // Calculando offsets e tamanhos reais
     nbrBoxes_offset /= nNbrBoxes * sizeof(int);
     nbrBoxes_nx     /= nNbrBoxes;
     iOff_offset     /= sizeof(real_t);
+    *ePot            = 0.0;
     
 	do_ljForce<<<1, 1, 0, starpu_cuda_get_local_stream()>>>(s6, eShift, epsilon, rCut2, nNbrBoxes, nLocalBoxes, nbrBoxes, nAtoms, r, f, U, ePot, nbrBoxes_offset, nbrBoxes_nx, iOff_offset);
     cudaError_t cures = cudaStreamSynchronize(starpu_cuda_get_local_stream());
@@ -104,14 +105,14 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
 		STARPU_CUDA_REPORT_ERROR(cures);
 }
 
-extern "C" void ePot_redux_cuda_func(void *descr[], void *cl_arg){
-    real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
-	real_t *ePot_worker = (real_t *)STARPU_VARIABLE_GET_PTR(descr[1]);
+// extern "C" void ePot_redux_cuda_func(void *descr[], void *cl_arg){
+//     real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
+// 	real_t *ePot_worker = (real_t *)STARPU_VARIABLE_GET_PTR(descr[1]);
 
-	cuda_redux<<<1,1, 0, starpu_cuda_get_local_stream()>>>(ePot, ePot_worker);
-}
+// 	cuda_redux<<<1,1, 0, starpu_cuda_get_local_stream()>>>(ePot, ePot_worker);
+// }
 
-extern "C" void ePot_init_cuda_func(void *descr[], void *cl_arg){
-    real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
-	cudaMemsetAsync(ePot, 0, sizeof(real_t), starpu_cuda_get_local_stream());
-}
+// extern "C" void ePot_init_cuda_func(void *descr[], void *cl_arg){
+//     real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
+// 	cudaMemsetAsync(ePot, 0, sizeof(real_t), starpu_cuda_get_local_stream());
+// }
