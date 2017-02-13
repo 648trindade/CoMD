@@ -1,12 +1,6 @@
 #include <starpu.h>
 #include "mytype.h"
 
-// defined in implemented in starpu_code.c
-struct params {
-    real_t s6, eShift, epsilon, rCut2;
-    int nNbrBoxes, nLocalBoxes;
-};
-
 static starpu_data_handle_t nAtoms_handle;
 static starpu_data_handle_t r_handle;
 static starpu_data_handle_t f_handle;

@@ -203,14 +203,16 @@ int ljForce(SimFlat* s)
    starpu_data_set_reduction_methods(ePot_handle, &ePot_redux_codelet, &ePot_init_codelet);
 
    // Copia paramêtros
-   struct params params = {
-      .s6 = s6, 
-      .eShift = eShift,
-      .epsilon = epsilon, 
-      .rCut2 = rCut2,
-      .nNbrBoxes = nNbrBoxes,
-      .nLocalBoxes = s->boxes->nLocalBoxes
-   };
+   void *buffer;
+   size_t buffer_size;
+   starpu_codelet_pack_args(&buffer, &buffer_size,
+      STARPU_VALUE,          &s6, sizeof(real_t),
+      STARPU_VALUE,      &eShift, sizeof(real_t),
+      STARPU_VALUE,     &epsilon, sizeof(real_t),
+      STARPU_VALUE,       &rCut2, sizeof(real_t),
+      STARPU_VALUE,   &nNbrBoxes, sizeof(int),
+      STARPU_VALUE, &s->boxes->nLocalBoxes, sizeof(int),
+   0);
 
    // loop over local boxes
    //#pragma omp parallel for reduction(+:ePot)
@@ -220,8 +222,8 @@ int ljForce(SimFlat* s)
       // Definição da task
       struct starpu_task *task = starpu_task_create();
       task->cl = &cl;
-      task->cl_arg = &params;
-      task->cl_arg_size = sizeof(struct params);
+      task->cl_arg = buffer;
+      task->cl_arg_size = buffer_size;
       task->synchronous = 0;
       // Atribui handles para a task
       task->handles[0] = starpu_data_get_sub_data(nbrBoxes_handle, 1, id);
@@ -261,14 +263,11 @@ int ljForce(SimFlat* s)
 void cpu_func(void *buffers[], void *cl_arg){
     
     // Angariando parâmetros
-    struct params *params = cl_arg;
-    real_t       s6 = params->s6;
-    real_t   eShift = params->eShift;
-    real_t  epsilon = params->epsilon;
-    real_t    rCut2 = params->rCut2;
-    int   nNbrBoxes = params->nNbrBoxes;
-    int nLocalBoxes = params->nLocalBoxes;
+    real_t s6, eShift, epsilon, rCut2;
+    int    nNbrBoxes, nLocalBoxes;
     
+    starpu_codelet_unpack_args(cl_arg, &s6, &eShift, &epsilon, &rCut2, &nNbrBoxes, &nLocalBoxes);
+
     // Angariando buffers
     int* nbrBoxes = (   int*) STARPU_VECTOR_GET_PTR(buffers[0]);
     int*   nAtoms = (   int*) STARPU_VECTOR_GET_PTR(buffers[1]);

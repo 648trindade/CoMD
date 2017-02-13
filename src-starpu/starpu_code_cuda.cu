@@ -1,5 +1,5 @@
 #include <starpu.h>
-#include "starpu_code.h"
+#include "mytype.h"
 
 #define MAXATOMS 64
 
@@ -66,13 +66,10 @@ static __global__ void cuda_redux(real_t *ePot, real_t *ePot_worker){
 
 extern "C" void cuda_func(void *buffers[], void *cl_arg){
     // Angariando parâmetros
-    struct params *params = cl_arg;
-    real_t       s6 = params->s6;
-    real_t   eShift = params->eShift;
-    real_t  epsilon = params->epsilon;
-    real_t    rCut2 = params->rCut2;
-    int   nNbrBoxes = params->nNbrBoxes;
-    int nLocalBoxes = params->nLocalBoxes;
+    real_t s6, eShift, epsilon, rCut2;
+    int    nNbrBoxes, nLocalBoxes;
+    
+    starpu_codelet_unpack_args(cl_arg, &s6, &eShift, &epsilon, &rCut2, &nNbrBoxes, &nLocalBoxes);
     
     // Angariando buffers
     int* nbrBoxes = (   int*) STARPU_VECTOR_GET_PTR(buffers[0]);
