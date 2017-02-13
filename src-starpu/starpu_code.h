@@ -21,10 +21,10 @@ static struct starpu_data_filter data_filter = {
 };
 
 void cpu_func(void *buffers[], void *cl_arg);
-#ifdef STARPU_HAVE_CUDA
-void cuda_func(void *buffers[], void *cl_arg);
-void ePot_redux_cuda_func(void *descr[], void *cl_arg);
-void ePot_init_cuda_func(void *descr[], void *cl_arg);
+#ifdef STARPU_USE_CUDA
+extern void cuda_func(void *buffers[], void *cl_arg);
+extern void ePot_redux_cuda_func(void *descr[], void *cl_arg);
+extern void ePot_init_cuda_func(void *descr[], void *cl_arg);
 #endif
 void ePot_redux_cpu_func(void *descr[], void *cl_arg);
 void ePot_init_cpu_func(void *descr[], void *cl_arg);

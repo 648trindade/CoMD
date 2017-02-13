@@ -35,7 +35,8 @@ OTHER_INCLUDE =
 
 HAS_CUDA	=	$(shell pkg-config --libs starpu-1.2 |grep -i cuda)
 ifneq ($(strip $(HAS_CUDA)),)
-NVCC = ncc
+NVCC = nvcc
+CUDAFLAGS = $(shell pkg-config --cflags starpu-1.2)
 endif
 
 
@@ -89,7 +90,7 @@ DEFAULT: ${CoMD_EXE}
 
 ifneq ($(strip $(HAS_CUDA)),)
 %.o: %.cu
-	${NVCC} $(CFLAGS) $< -c
+	${NVCC} ${CUDAFLAGS} $< -c
 endif
 
 ${CoMD_EXE}: ${BIN_DIR} CoMD_info.h ${OBJECTS} 

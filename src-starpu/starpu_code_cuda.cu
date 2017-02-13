@@ -1,11 +1,13 @@
 #include <starpu.h>
 #include "starpu_code.h"
 
+#define MAXATOMS 64
+
 static __global__ void do_ljForce(
     real_t s6, real_t eShift, real_t epsilon, real_t rCut2, int nNbrBoxes,
     int nLocalBoxes, int* nbrBoxes, int* nAtoms, real3* r, real3* f, real_t* U,
     real_t* ePot, size_t nbrBoxes_offset, size_t nbrBoxes_nx,
-    sizet_t iOff_offset
+    size_t iOff_offset
 ){
     for (int iBox = nbrBoxes_offset; iBox < nbrBoxes_offset + nbrBoxes_nx && iBox < nLocalBoxes; iBox++){
 
@@ -99,7 +101,7 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
     nbrBoxes_nx     /= nNbrBoxes;
     iOff_offset     /= sizeof(real_t);
     
-	do_ljForce<<<1, 1, 0, starpu_cuda_get_local_stream()>>>(s6, eShift, epsilon, rCut2, nNbrBoxes, nLocalBoxes, boxes, nAtoms, r, f, U, ePot, nbrBoxes_offset, nbrBoxes_nx, iOff_offset);
+	do_ljForce<<<1, 1, 0, starpu_cuda_get_local_stream()>>>(s6, eShift, epsilon, rCut2, nNbrBoxes, nLocalBoxes, nbrBoxes, nAtoms, r, f, U, ePot, nbrBoxes_offset, nbrBoxes_nx, iOff_offset);
     cudaError_t cures = cudaStreamSynchronize(starpu_cuda_get_local_stream());
 	if (cures)
 		STARPU_CUDA_REPORT_ERROR(cures);
