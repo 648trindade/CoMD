@@ -17,8 +17,7 @@ static __global__ void do_ljForce(
       for (int jTmp=0; jTmp<nNbrBoxes; jTmp++){
             int jBox = nbrBoxes[(iBox - nbrBoxes_offset) * nNbrBoxes + jTmp];
             
-            //assert(jBox>=0);
-            STARPU_ASSERT(jBox>=0);
+            assert(jBox>=0);
             
             int nJBox = nAtoms[jBox];
             

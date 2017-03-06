@@ -155,7 +155,7 @@ int ljForce(SimFlat* s)
    real_t ePot = 0.0;
    s->ePotential = 0.0;
    int fSize = s->boxes->nTotalBoxes*MAXATOMS;
-   #pragma omp parallel for
+   //#pragma omp parallel for
    for (int ii=0; ii<fSize; ++ii)
    {
       zeroReal3(s->atoms->f[ii]);
@@ -167,11 +167,12 @@ int ljForce(SimFlat* s)
    real_t rCut6 = s6 / (rCut2*rCut2*rCut2);
    real_t eShift = POT_SHIFT * rCut6 * (rCut6 - 1.0);
 
+   int nLocalBoxes = s->boxes->nLocalBoxes;
    int nNbrBoxes = 27;
 
    // Uma task por box / laço
-   NTASKS = s->boxes->nLocalBoxes;
-   real_t task_ePot[NTASKS];
+   NTASKS = (getenv("NTASKS")) ? atoi(getenv("NTASKS")) : nLocalBoxes;
+   real_t* task_ePot = (real_t*)comdMalloc(NTASKS * sizeof(real_t));
 
    /* Todo dado registrado por um handle poderá(ia) ser usado sem forçar
       serialização das tasks a partir desse ponto */
@@ -183,14 +184,13 @@ int ljForce(SimFlat* s)
    starpu_vector_data_register(&r_handle, STARPU_MAIN_RAM, 
       (uintptr_t)s->atoms->r, fSize, sizeof(real3));
    starpu_vector_data_register(&f_handle, STARPU_MAIN_RAM, 
-      (uintptr_t)s->atoms->f, s->boxes->nLocalBoxes * MAXATOMS,
-      sizeof(real3));
+      (uintptr_t)s->atoms->f, nLocalBoxes * MAXATOMS, sizeof(real3));
    starpu_vector_data_register(&U_handle, STARPU_MAIN_RAM, 
-      (uintptr_t)s->atoms->U, s->boxes->nLocalBoxes * MAXATOMS, sizeof(real_t));
+      (uintptr_t)s->atoms->U, nLocalBoxes * MAXATOMS, sizeof(real_t));
    starpu_vector_data_register(&ePot_handle, STARPU_MAIN_RAM, 
       (uintptr_t)task_ePot, NTASKS, sizeof(real_t));
    starpu_vector_data_register(&nbrBoxes_handle, STARPU_MAIN_RAM, 
-      (uintptr_t)s->boxes->nbrBoxes[0], s->boxes->nLocalBoxes * 27, 
+      (uintptr_t)s->boxes->nbrBoxes[0], nLocalBoxes * 27, 
       sizeof(s->boxes->nbrBoxes[0][0]));
    
    // Dados serão particionados pelo número de tasks
@@ -209,7 +209,7 @@ int ljForce(SimFlat* s)
       STARPU_VALUE,     &epsilon, sizeof(real_t),
       STARPU_VALUE,       &rCut2, sizeof(real_t),
       STARPU_VALUE,   &nNbrBoxes, sizeof(int),
-      STARPU_VALUE, &s->boxes->nLocalBoxes, sizeof(int),
+      STARPU_VALUE, &nLocalBoxes, sizeof(int),
    0);
 
    // loop over local boxes
@@ -251,7 +251,8 @@ int ljForce(SimFlat* s)
 
    for (int i = 0; i < NTASKS; i++)
       ePot += task_ePot[i];
-   
+   comdFree(task_ePot);
+
    ePot = ePot*4.0*epsilon;
    s->ePotential = ePot;
 
@@ -285,11 +286,11 @@ void cpu_func(void *buffers[], void *cl_arg){
     size_t U_nx = (size_t) STARPU_VECTOR_GET_NX(buffers[4]);
 
     // Conferindo se offsets e tamanhos estão dentro do esperado
-    STARPU_ASSERT((nbrBoxes_offset / sizeof(int)) % nNbrBoxes == 0);
-    STARPU_ASSERT(nbrBoxes_nx % nNbrBoxes == 0);
-    STARPU_ASSERT((iOff_offset / sizeof(real_t)) % MAXATOMS == 0);
-    STARPU_ASSERT(U_nx % MAXATOMS == 0);
-    STARPU_ASSERT(f_nx % MAXATOMS == 0);
+    STARPU_ASSERT_MSG((nbrBoxes_offset / sizeof(int)) % nNbrBoxes == 0, "Particionamento de nbrBoxes problemático");
+    STARPU_ASSERT_MSG(nbrBoxes_nx % nNbrBoxes == 0, "Particionamento de nbrBoxes problemático");
+    STARPU_ASSERT_MSG((iOff_offset / sizeof(real_t)) % MAXATOMS == 0, "Particionamento dos átomos problemático");
+    STARPU_ASSERT_MSG(U_nx % MAXATOMS == 0, "Particionamento dos átomos problemático");
+    STARPU_ASSERT_MSG(f_nx % MAXATOMS == 0, "Particionamento dos átomos problemático");
 
     // Calculando offsets e tamanhos reais
     nbrBoxes_offset /= nNbrBoxes * sizeof(int);
