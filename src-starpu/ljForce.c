@@ -212,6 +212,15 @@ int ljForce(SimFlat* s)
       STARPU_VALUE, &nLocalBoxes, sizeof(int),
    0);
 
+#ifdef STARPU_USE_CUDA
+   starpu_data_fetch_on_node(nbrBoxes_handle, STARPU_CUDA_RAM, 1);
+   starpu_data_fetch_on_node(nAtoms_handle, STARPU_CUDA_RAM, 1);
+   starpu_data_fetch_on_node(r_handle, STARPU_CUDA_RAM, 1);
+   starpu_data_fetch_on_node(U_handle, STARPU_CUDA_RAM, 1);
+   starpu_data_fetch_on_node(f_handle, STARPU_CUDA_RAM, 1);
+   starpu_data_fetch_on_node(ePot_handle, STARPU_CUDA_RAM, 1);
+#endif
+
    // loop over local boxes
    for (int id = 0; id < NTASKS; id++)
    {

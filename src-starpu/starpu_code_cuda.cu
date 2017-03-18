@@ -9,6 +9,8 @@ static __global__ void do_ljForce(
     real_t* ePot, size_t nbrBoxes_offset, size_t nbrBoxes_nx,
     size_t iOff_offset
 ){
+    printf("GPU\n         s6: %lf\n     eShift: %lf\n    epsilon: %lf\n      rCut2: %lf\n  nNbrBoxes: %d\nnLocalBoxes: %d\n------\n",s6,eShift,epsilon,rCut2,nNbrBoxes,nLocalBoxes);
+    *ePot = 0.0;
     for (int iBox = nbrBoxes_offset; iBox < nbrBoxes_offset + nbrBoxes_nx && iBox < nLocalBoxes; iBox++){
 
       int nIBox = nAtoms[iBox];
@@ -96,7 +98,6 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
     nbrBoxes_offset /= nNbrBoxes * sizeof(int);
     nbrBoxes_nx     /= nNbrBoxes;
     iOff_offset     /= sizeof(real_t);
-    *ePot            = 0.0;
     
 	do_ljForce<<<1, 1, 0, starpu_cuda_get_local_stream()>>>(s6, eShift, epsilon, rCut2, nNbrBoxes, nLocalBoxes, nbrBoxes, nAtoms, r, f, U, ePot, nbrBoxes_offset, nbrBoxes_nx, iOff_offset);
     cudaError_t cures = cudaStreamSynchronize(starpu_cuda_get_local_stream());

@@ -15,7 +15,7 @@ DO_MPI = OFF
 ### specify paths to include files that the compiler can't find on its
 ### own.  If you need any -L or -l switches to get C standard libraries
 ### (such as -lm for the math library) put them in C_LIB.
-CC = gcc
+CC = gcc-4.9
 CFLAGS = -std=gnu99 -fopenmp $(shell pkg-config --cflags starpu-1.2)
 OPTFLAGS = -g -O3
 INCLUDES = 
@@ -33,10 +33,10 @@ OTHER_LIB =
 OTHER_INCLUDE =
 
 
-HAS_CUDA	=	$(shell pkg-config --libs starpu-1.2 |grep -i cuda)
+HAS_CUDA = $(shell pkg-config --libs starpu-1.2 |grep -i cuda)
 ifneq ($(strip $(HAS_CUDA)),)
 NVCC = nvcc
-CUDAFLAGS = $(shell pkg-config --cflags starpu-1.2)
+CUDAFLAGS = -ccbin $(CC) $(shell pkg-config --cflags starpu-1.2)
 endif
 
 
