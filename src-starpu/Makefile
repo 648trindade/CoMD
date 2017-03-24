@@ -37,6 +37,11 @@ HAS_CUDA = $(shell pkg-config --libs starpu-1.2 |grep -i cuda)
 ifneq ($(strip $(HAS_CUDA)),)
 NVCC = nvcc
 CUDAFLAGS = -ccbin $(CC) $(shell pkg-config --cflags starpu-1.2)
+ifeq ($(DOUBLE_PRECISION), ON)
+CUDAFLAGS += -DDOUBLE
+else
+CUDAFLAGS += -DSINGLE
+endif
 endif
 
 

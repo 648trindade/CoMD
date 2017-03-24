@@ -171,8 +171,7 @@ int ljForce(SimFlat* s)
    int nNbrBoxes = 27;
 
    // Uma task por box / laço
-   NTASKS = (getenv("NTASKS")) ? atoi(getenv("NTASKS")) : nLocalBoxes;
-   real_t* task_ePot = (real_t*)comdMalloc(NTASKS * sizeof(real_t));
+   int NTASKS = (getenv("NTASKS")) ? atoi(getenv("NTASKS")) : nLocalBoxes;
 
    /* Todo dado registrado por um handle poderá(ia) ser usado sem forçar
       serialização das tasks a partir desse ponto */
@@ -187,18 +186,19 @@ int ljForce(SimFlat* s)
       (uintptr_t)s->atoms->f, nLocalBoxes * MAXATOMS, sizeof(real3));
    starpu_vector_data_register(&U_handle, STARPU_MAIN_RAM, 
       (uintptr_t)s->atoms->U, nLocalBoxes * MAXATOMS, sizeof(real_t));
-   starpu_vector_data_register(&ePot_handle, STARPU_MAIN_RAM, 
-      (uintptr_t)task_ePot, NTASKS, sizeof(real_t));
    starpu_vector_data_register(&nbrBoxes_handle, STARPU_MAIN_RAM, 
       (uintptr_t)s->boxes->nbrBoxes[0], nLocalBoxes * 27, 
       sizeof(s->boxes->nbrBoxes[0][0]));
+   starpu_variable_data_register(&ePot_handle, STARPU_MAIN_RAM, 
+      (uintptr_t)&ePot, sizeof(real_t));
    
    // Dados serão particionados pelo número de tasks
    data_filter.nchildren = NTASKS;
    starpu_data_partition(nbrBoxes_handle, &data_filter);
    starpu_data_partition(U_handle, &data_filter);
    starpu_data_partition(f_handle, &data_filter);
-   starpu_data_partition(ePot_handle, &data_filter);
+
+   starpu_data_set_reduction_methods(ePot_handle, &ePot_redux_codelet, &ePot_init_codelet);
 
    // Copia paramêtros
    void *buffer;
@@ -212,14 +212,14 @@ int ljForce(SimFlat* s)
       STARPU_VALUE, &nLocalBoxes, sizeof(int),
    0);
 
-#ifdef STARPU_USE_CUDA
-   starpu_data_fetch_on_node(nbrBoxes_handle, STARPU_CUDA_RAM, 1);
-   starpu_data_fetch_on_node(nAtoms_handle, STARPU_CUDA_RAM, 1);
-   starpu_data_fetch_on_node(r_handle, STARPU_CUDA_RAM, 1);
-   starpu_data_fetch_on_node(U_handle, STARPU_CUDA_RAM, 1);
-   starpu_data_fetch_on_node(f_handle, STARPU_CUDA_RAM, 1);
-   starpu_data_fetch_on_node(ePot_handle, STARPU_CUDA_RAM, 1);
-#endif
+// #ifdef STARPU_USE_CUDA
+//    starpu_data_fetch_on_node(nbrBoxes_handle, STARPU_CUDA_RAM, 1);
+//    starpu_data_fetch_on_node(nAtoms_handle, STARPU_CUDA_RAM, 1);
+//    starpu_data_prefetch_on_node(r_handle, STARPU_CUDA_RAM, 1);
+//    starpu_data_fetch_on_node(U_handle, STARPU_CUDA_RAM, 1);
+//    starpu_data_fetch_on_node(f_handle, STARPU_CUDA_RAM, 1);
+//    starpu_data_fetch_on_node(ePot_handle, STARPU_CUDA_RAM, 1);
+// #endif
 
    // loop over local boxes
    for (int id = 0; id < NTASKS; id++)
@@ -237,7 +237,7 @@ int ljForce(SimFlat* s)
       task->handles[2] = r_handle;
       task->handles[3] = starpu_data_get_sub_data(f_handle, 1, id);
       task->handles[4] = starpu_data_get_sub_data(U_handle, 1, id);
-      task->handles[5] = starpu_data_get_sub_data(ePot_handle, 1, id);
+      task->handles[5] = ePot_handle;
 
       // Submete a task assincronamente
       int ret = starpu_task_submit(task);
@@ -248,7 +248,6 @@ int ljForce(SimFlat* s)
    starpu_data_unpartition(nbrBoxes_handle, STARPU_MAIN_RAM);
    starpu_data_unpartition(U_handle, STARPU_MAIN_RAM);
    starpu_data_unpartition(f_handle, STARPU_MAIN_RAM);
-   starpu_data_unpartition(ePot_handle, STARPU_MAIN_RAM);
 
    // Desregistra todos os handles
    starpu_data_unregister_no_coherency(nAtoms_handle);
@@ -258,12 +257,9 @@ int ljForce(SimFlat* s)
    starpu_data_unregister(ePot_handle);
    starpu_data_unregister_no_coherency(nbrBoxes_handle);
 
-   for (int i = 0; i < NTASKS; i++)
-      ePot += task_ePot[i];
-   comdFree(task_ePot);
-
    ePot = ePot*4.0*epsilon;
    s->ePotential = ePot;
+   printf("-----\n");
 
    //starpu_codelet_display_stats(&cl);
 
@@ -285,7 +281,7 @@ void cpu_func(void *buffers[], void *cl_arg){
     real3*      r = ( real3*) STARPU_VECTOR_GET_PTR(buffers[2]);
     real3*      f = ( real3*) STARPU_VECTOR_GET_PTR(buffers[3]);
     real_t*     U = (real_t*) STARPU_VECTOR_GET_PTR(buffers[4]);
-    real_t*  ePot = (real_t*) STARPU_VECTOR_GET_PTR(buffers[5]);
+    real_t*  ePot = (real_t*) STARPU_VARIABLE_GET_PTR(buffers[5]);
     
     // Angariando offsets e números de elementos
     size_t nbrBoxes_offset = (size_t) STARPU_VECTOR_GET_OFFSET(buffers[0]);
@@ -355,16 +351,17 @@ void cpu_func(void *buffers[], void *cl_arg){
     }
 }
 
-// void ePot_redux_cpu_func(void *descr[], void *cl_arg)
-// {
-// 	real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
-// 	real_t *ePot_worker = (real_t *)STARPU_VARIABLE_GET_PTR(descr[1]);
+void ePot_redux_cpu_func(void *descr[], void *cl_arg)
+{
+	real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
+	real_t *ePot_worker = (real_t *)STARPU_VARIABLE_GET_PTR(descr[1]);
 
-//       *ePot = *ePot + *ePot_worker;
-// }
+      *ePot = *ePot + *ePot_worker;
+      //printf("CPU %f\n",*ePot_worker);
+}
 
-// void ePot_init_cpu_func(void *descr[], void *cl_arg)
-// {
-// 	real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
-// 	*ePot = 0.0;
-// }
+void ePot_init_cpu_func(void *descr[], void *cl_arg)
+{
+	real_t *ePot = (real_t *)STARPU_VARIABLE_GET_PTR(descr[0]);
+	*ePot = 0.0;
+}
