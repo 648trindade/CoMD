@@ -95,9 +95,6 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
 
     // int n_threads = STARPU_MIN(MAXTHREADS, nbrBoxes_nx);
     // int loops_per_thread = (nbrBoxes_nx + n_threads - 1) / n_threads;
-    // printf("nbrBoxes de %u até %u.\n",nbrBoxes_offset, nbrBoxes_nx + nbrBoxes_offset);
-    // printf("iOff: %u. f_nx: %u U_nx: %u\n", iOff_offset, f_nx, U_nx);
-    //printf("%d threads with %d loops per thread\n",n_threads,loops_per_thread);
     
 	do_ljForce<<<1, 1, 0, starpu_cuda_get_local_stream()>>>(s6, eShift, epsilon, rCut2, nNbrBoxes, nLocalBoxes, nbrBoxes, nAtoms, r, f, U, ePot, nbrBoxes_offset, nbrBoxes_nx, iOff_offset);
     cudaError_t cures = cudaStreamSynchronize(starpu_cuda_get_local_stream());
