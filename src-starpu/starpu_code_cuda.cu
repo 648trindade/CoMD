@@ -62,9 +62,9 @@ static __global__ void do_ljForce(
 extern "C" void cuda_func(void *buffers[], void *cl_arg){
     // Angariando parâmetros
     real_t s6, eShift, epsilon, rCut2;
-    int    nNbrBoxes, nLocalBoxes;
+    int    nNbrBoxes, nLocalBoxes, id;
     
-    starpu_codelet_unpack_args(cl_arg, &s6, &eShift, &epsilon, &rCut2, &nNbrBoxes, &nLocalBoxes);
+    starpu_codelet_unpack_args(cl_arg, &s6, &eShift, &epsilon, &rCut2, &nNbrBoxes, &nLocalBoxes, &id);
     
     // Angariando buffers
     int* nbrBoxes = (   int*) STARPU_VECTOR_GET_PTR(buffers[0]);
@@ -75,23 +75,25 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
     real_t*  ePot = (real_t*) STARPU_VARIABLE_GET_PTR(buffers[5]);
     
     // Angariando offsets e números de elementos
-    size_t nbrBoxes_offset = (size_t) STARPU_VECTOR_GET_OFFSET(buffers[0]);
+    //size_t nbrBoxes_offset = (size_t) STARPU_VECTOR_GET_OFFSET(buffers[0]);
     size_t nbrBoxes_nx = (size_t) STARPU_VECTOR_GET_NX(buffers[0]);
-    size_t iOff_offset = (size_t) STARPU_VECTOR_GET_OFFSET(buffers[4]);
+    //size_t iOff_offset = (size_t) STARPU_VECTOR_GET_OFFSET(buffers[4]);
     size_t f_nx = (size_t) STARPU_VECTOR_GET_NX(buffers[3]);
     size_t U_nx = (size_t) STARPU_VECTOR_GET_NX(buffers[4]);
 
     // Conferindo se offsets e tamanhos estão dentro do esperado
-    STARPU_ASSERT((nbrBoxes_offset / sizeof(int)) % nNbrBoxes == 0);
+    //STARPU_ASSERT((nbrBoxes_offset / sizeof(int)) % nNbrBoxes == 0);
     STARPU_ASSERT(nbrBoxes_nx % nNbrBoxes == 0);
-    STARPU_ASSERT((iOff_offset / sizeof(real_t)) % MAXATOMS == 0);
+    //STARPU_ASSERT((iOff_offset / sizeof(real_t)) % MAXATOMS == 0);
     STARPU_ASSERT(U_nx % MAXATOMS == 0);
     STARPU_ASSERT(f_nx % MAXATOMS == 0);
     
     // Calculando offsets e tamanhos reais
-    nbrBoxes_offset /= nNbrBoxes * sizeof(int);
+    //nbrBoxes_offset /= nNbrBoxes * sizeof(int);
+    nbrBoxes_offset = nbrBoxes_nx * id;
     nbrBoxes_nx     /= nNbrBoxes;
-    iOff_offset     /= sizeof(real_t);
+    iOff_offset = U_nx * id;
+    //iOff_offset     /= sizeof(real_t);
 
     // int n_threads = STARPU_MIN(MAXTHREADS, nbrBoxes_nx);
     // int loops_per_thread = (nbrBoxes_nx + n_threads - 1) / n_threads;
