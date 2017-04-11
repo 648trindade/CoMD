@@ -201,16 +201,7 @@ int ljForce(SimFlat* s)
    starpu_data_set_reduction_methods(ePot_handle, &ePot_redux_codelet, &ePot_init_codelet);
 
    // Copia paramêtros
-   void *buffer;
-   size_t buffer_size;
-   starpu_codelet_pack_args(&buffer, &buffer_size,
-      STARPU_VALUE,          &s6, sizeof(real_t),
-      STARPU_VALUE,      &eShift, sizeof(real_t),
-      STARPU_VALUE,     &epsilon, sizeof(real_t),
-      STARPU_VALUE,       &rCut2, sizeof(real_t),
-      STARPU_VALUE,   &nNbrBoxes, sizeof(int),
-      STARPU_VALUE, &nLocalBoxes, sizeof(int),
-   0);
+   void *buffer[NTASKS]; 
 
 // #ifdef STARPU_USE_CUDA
 //    starpu_data_fetch_on_node(nbrBoxes_handle, STARPU_CUDA_RAM, 1);
@@ -225,6 +216,17 @@ int ljForce(SimFlat* s)
    for (int id = 0; id < NTASKS; id++)
    {
       // Coração do laço retirado e movido pra cpu_func()
+      size_t buffer_size;
+      starpu_codelet_pack_args(&buffer[id], &buffer_size,
+            STARPU_VALUE,          &s6, sizeof(real_t),
+            STARPU_VALUE,      &eShift, sizeof(real_t),
+            STARPU_VALUE,     &epsilon, sizeof(real_t),
+            STARPU_VALUE,       &rCut2, sizeof(real_t),
+            STARPU_VALUE,   &nNbrBoxes, sizeof(int),
+            STARPU_VALUE, &nLocalBoxes, sizeof(int),
+            STARPU_VALUE,          &id, sizeof(int),
+      0);
+
       // Definição da task
       struct starpu_task *task = starpu_task_create();
       task->cl = &cl;
@@ -271,9 +273,9 @@ void cpu_func(void *buffers[], void *cl_arg){
     
     // Angariando parâmetros
     real_t s6, eShift, epsilon, rCut2;
-    int    nNbrBoxes, nLocalBoxes;
+    int    nNbrBoxes, nLocalBoxes, id;
     
-    starpu_codelet_unpack_args(cl_arg, &s6, &eShift, &epsilon, &rCut2, &nNbrBoxes, &nLocalBoxes);
+    starpu_codelet_unpack_args(cl_arg, &s6, &eShift, &epsilon, &rCut2, &nNbrBoxes, &nLocalBoxes, &id);
 
     // Angariando buffers
     int* nbrBoxes = (   int*) STARPU_VECTOR_GET_PTR(buffers[0]);
