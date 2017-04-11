@@ -253,23 +253,23 @@ int eamForce(SimFlat* s)
             //#pragma omp parallel for reduction(+:etot)
             for (int iBox=0; iBox<s->boxes->nLocalBoxes; iBox++)
             {
-                  #pragma omp task firstprivate(iBox)
+                  #pragma omp task firstprivate(iBox) shared(etot)
                   {
-                        int nIBox = s->boxes->nAtoms[iBox];
-                  
-                        // loop over neighbor boxes of iBox (some may be halo boxes)
-                        for (int jTmp=0; jTmp<nNbrBoxes; jTmp++)
+                  int nIBox = s->boxes->nAtoms[iBox];
+            
+                  // loop over neighbor boxes of iBox (some may be halo boxes)
+                  for (int jTmp=0; jTmp<nNbrBoxes; jTmp++)
+                  {
+                  int jBox = s->boxes->nbrBoxes[iBox][jTmp];
+                  int nJBox = s->boxes->nAtoms[jBox];
+            
+                  // loop over atoms in iBox
+                  for (int iOff=MAXATOMS*iBox; iOff<(iBox*MAXATOMS+nIBox); iOff++)
+                  {
+                        // loop over atoms in jBox
+                        for (int jOff=MAXATOMS*jBox; jOff<(jBox*MAXATOMS+nJBox); jOff++)
                         {
-                        int jBox = s->boxes->nbrBoxes[iBox][jTmp];
-                        int nJBox = s->boxes->nAtoms[jBox];
-                  
-                        // loop over atoms in iBox
-                        for (int iOff=MAXATOMS*iBox; iOff<(iBox*MAXATOMS+nIBox); iOff++)
-                        {
-                              // loop over atoms in jBox
-                              for (int jOff=MAXATOMS*jBox; jOff<(jBox*MAXATOMS+nJBox); jOff++)
-                              {
-                  
+                        
                               real3 dr;
                               real_t r2 = 0.0;
                               for (int k=0; k<3; k++)
@@ -300,34 +300,37 @@ int eamForce(SimFlat* s)
                                     // accumulate rhobar for each atom
                                     pot->rhobar[iOff] += rhoTmp;
                               }
-                  
-                              } // loop over atoms in jBox
-                        } // loop over atoms in iBox
-                        } // loop over neighbor boxes
-                  }
+                        } // loop over atoms in jBox
+                  } // loop over atoms in iBox
+                  } // loop over neighbor boxes
+                  } // end task
             } // loop over local boxes
             
+            #pragma omp taskwait
+
             // Compute Embedding Energy
             // loop over all local boxes
             //#pragma omp parallel for reduction(+:etot)
             for (int iBox=0; iBox<s->boxes->nLocalBoxes; iBox++)
             {
-                  #pragma omp task firstprivate(iBox)
+                  #pragma omp task firstprivate(iBox) shared(etot)
                   {
-                        int nIBox =  s->boxes->nAtoms[iBox];
-                  
-                        // loop over atoms in iBox
-                        for (int iOff=MAXATOMS*iBox; iOff<(MAXATOMS*iBox+nIBox); iOff++)
-                        {
-                              real_t fEmbed, dfEmbed;
-                              interpolate(pot->f, pot->rhobar[iOff], &fEmbed, &dfEmbed);
-                              pot->dfEmbed[iOff] = dfEmbed; // save derivative for halo exchange
-                              s->atoms->U[iOff] += fEmbed;
-                              #pragma omp atomic
-                              etot += fEmbed;
-                        }
+                  int nIBox =  s->boxes->nAtoms[iBox];
+            
+                  // loop over atoms in iBox
+                  for (int iOff=MAXATOMS*iBox; iOff<(MAXATOMS*iBox+nIBox); iOff++)
+                  {
+                        real_t fEmbed, dfEmbed;
+                        interpolate(pot->f, pot->rhobar[iOff], &fEmbed, &dfEmbed);
+                        pot->dfEmbed[iOff] = dfEmbed; // save derivative for halo exchange
+                        s->atoms->U[iOff] += fEmbed;
+                        #pragma omp atomic
+                        etot += fEmbed;
+                  }
                   }
             }
+
+            #pragma omp taskwait
             
             // exchange derivative of the embedding energy with repsect to rhobar
             startTimer(eamHaloTimer);
@@ -341,46 +344,44 @@ int eamForce(SimFlat* s)
             {
                   #pragma omp task firstprivate(iBox)
                   {
-                        int nIBox = s->boxes->nAtoms[iBox];
+                  int nIBox = s->boxes->nAtoms[iBox];
+            
+                  // loop over neighbor boxes of iBox (some may be halo boxes)
+                  for (int jTmp=0; jTmp<nNbrBoxes; jTmp++)
+                  {
+                        int jBox = s->boxes->nbrBoxes[iBox][jTmp];
+                        int nJBox = s->boxes->nAtoms[jBox];
                   
-                        // loop over neighbor boxes of iBox (some may be halo boxes)
-                        for (int jTmp=0; jTmp<nNbrBoxes; jTmp++)
+                        // loop over atoms in iBox
+                        for (int iOff=MAXATOMS*iBox; iOff<(MAXATOMS*iBox+nIBox); iOff++)
                         {
-                              int jBox = s->boxes->nbrBoxes[iBox][jTmp];
-                              int nJBox = s->boxes->nAtoms[jBox];
+                              // loop over atoms in jBox
+                              for (int jOff=MAXATOMS*jBox; jOff<(MAXATOMS*jBox+nJBox); jOff++)
+                              { 
+                                    real_t r2 = 0.0;
+                                    real3 dr;
+                                    for (int k=0; k<3; k++)
+                                    {
+                                          dr[k]=s->atoms->r[iOff][k]-s->atoms->r[jOff][k];
+                                          r2+=dr[k]*dr[k];
+                                    }
                         
-                              // loop over atoms in iBox
-                              for (int iOff=MAXATOMS*iBox; iOff<(MAXATOMS*iBox+nIBox); iOff++)
-                              {
-                                    // loop over atoms in jBox
-                                    for (int jOff=MAXATOMS*jBox; jOff<(MAXATOMS*jBox+nJBox); jOff++)
-                                    { 
+                                    if(r2 <= rCut2 && r2 > 0.0)
+                                    {
                         
-                                          real_t r2 = 0.0;
-                                          real3 dr;
+                                          real_t r = sqrt(r2);
+                        
+                                          real_t rhoTmp, dRho;
+                                          interpolate(pot->rho, r, &rhoTmp, &dRho);
+                        
                                           for (int k=0; k<3; k++)
                                           {
-                                                dr[k]=s->atoms->r[iOff][k]-s->atoms->r[jOff][k];
-                                                r2+=dr[k]*dr[k];
+                                                s->atoms->f[iOff][k] -= (pot->dfEmbed[iOff]+pot->dfEmbed[jOff])*dRho*dr[k]/r;
                                           }
-                              
-                                          if(r2 <= rCut2 && r2 > 0.0)
-                                          {
-                              
-                                                real_t r = sqrt(r2);
-                              
-                                                real_t rhoTmp, dRho;
-                                                interpolate(pot->rho, r, &rhoTmp, &dRho);
-                              
-                                                for (int k=0; k<3; k++)
-                                                {
-                                                      s->atoms->f[iOff][k] -= (pot->dfEmbed[iOff]+pot->dfEmbed[jOff])*dRho*dr[k]/r;
-                                                }
-                                          }
-                        
-                                    } // loop over atoms in jBox
-                              } // loop over atoms in iBox
-                        } // loop over neighbor boxes
+                                    }
+                              } // loop over atoms in jBox
+                        } // loop over atoms in iBox
+                  } // loop over neighbor boxes
                   }
             } // loop over local boxes
       }
