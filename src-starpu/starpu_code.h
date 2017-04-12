@@ -23,8 +23,8 @@ void ePot_redux_cpu_func(void *descr[], void *cl_arg);
 void ePot_init_cpu_func(void *descr[], void *cl_arg);
 
 static struct starpu_codelet ePot_redux_codelet = {
-    // .cpu_funcs = {ePot_redux_cpu_func},
-    // .cpu_funcs_name = {"ePot_redux_cpu_func"},
+    .cpu_funcs = {ePot_redux_cpu_func},
+    .cpu_funcs_name = {"ePot_redux_cpu_func"},
 #ifdef STARPU_USE_CUDA
     .cuda_funcs = {ePot_redux_cuda_func},
     .cuda_flags = {STARPU_CUDA_ASYNC},
@@ -35,8 +35,8 @@ static struct starpu_codelet ePot_redux_codelet = {
 };
 
 static struct starpu_codelet ePot_init_codelet = {
-    // .cpu_funcs = {ePot_init_cpu_func},
-    // .cpu_funcs_name = {"ePot_init_cpu_func"},
+    .cpu_funcs = {ePot_init_cpu_func},
+    .cpu_funcs_name = {"ePot_init_cpu_func"},
 #ifdef STARPU_USE_CUDA
     .cuda_funcs = {ePot_init_cuda_func},
     .cuda_flags = {STARPU_CUDA_ASYNC},
@@ -48,8 +48,8 @@ static struct starpu_codelet ePot_init_codelet = {
 
 // codelet definition
 static struct starpu_codelet cl = {
-    // .cpu_funcs = { cpu_func },
-    // .cpu_funcs_name = { "cpu_func" },
+    .cpu_funcs = { cpu_func },
+    .cpu_funcs_name = { "cpu_func" },
 #ifdef STARPU_USE_CUDA
     .cuda_funcs = { cuda_func },
     .cuda_flags = {STARPU_CUDA_ASYNC},

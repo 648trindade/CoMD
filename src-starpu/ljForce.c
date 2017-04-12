@@ -230,7 +230,7 @@ int ljForce(SimFlat* s)
       // Definição da task
       struct starpu_task *task = starpu_task_create();
       task->cl = &cl;
-      task->cl_arg = buffer;
+      task->cl_arg = buffer[id];
       task->cl_arg_size = buffer_size;
       task->synchronous = 0;
       // Atribui handles para a task
@@ -261,7 +261,7 @@ int ljForce(SimFlat* s)
 
    ePot = ePot*4.0*epsilon;
    s->ePotential = ePot;
-   printf("-----\n");
+   //printf("-----\n");
 
    //starpu_codelet_display_stats(&cl);
 

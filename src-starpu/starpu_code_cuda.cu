@@ -10,8 +10,14 @@ static __global__ void do_ljForce(
     real_t* ePot, size_t nbrBoxes_offset, size_t nbrBoxes_nx,
     size_t iOff_offset
 ){
-    *ePot = 0.0;
-    for (int iBox = nbrBoxes_offset; iBox < nbrBoxes_offset + nbrBoxes_nx && iBox < nLocalBoxes; iBox++){
+    extern __shared__ real_t ePot_data[];
+    unsigned int tid = threadIdx.x;
+    
+    ePot_data[tid] = 0.0;
+
+    //*ePot = 0.0;
+    int iBox = nbrBoxes_offset + tid;
+    //for (int iBox = nbrBoxes_offset; iBox < nbrBoxes_offset + nbrBoxes_nx && iBox < nLocalBoxes; iBox++){
 
       int nIBox = nAtoms[iBox];
       
@@ -45,7 +51,8 @@ static __global__ void do_ljForce(
                      real_t r6 = s6 * (r2*r2*r2);
                      real_t eLocal = r6 * (r6 - 1.0) - eShift;
                      U[task_iOff] += 0.5*eLocal;
-                     *ePot = *ePot + 0.5*eLocal;
+                     //*ePot = *ePot + 0.5*eLocal;
+                     ePot_data[tid] += 0.5*eLocal;
 
                      // different formulation to avoid sqrt computation
                      real_t fr = - 4.0*epsilon*r6*r2*(12.0*r6 - 6.0);
@@ -55,7 +62,15 @@ static __global__ void do_ljForce(
                } // loop over atoms in jBox
          } // loop over atoms in iBox
       } // loop over neighbor boxes
-    }
+   // }
+    __syncthreads();
+    // do reduction in shared mem
+    for (unsigned int s=1; s < blockDim.x; s *= 2)
+        if ((tid % (2*s) == 0) && (tid + s < blockDim.x))
+            ePot_data[tid] += ePot_data[tid + s];
+        __syncthreads();
+    if (tid == 0)
+        *ePot += ePot_data[0];
     return;
 }
 
@@ -90,15 +105,15 @@ extern "C" void cuda_func(void *buffers[], void *cl_arg){
     
     // Calculando offsets e tamanhos reais
     //nbrBoxes_offset /= nNbrBoxes * sizeof(int);
-    nbrBoxes_offset = nbrBoxes_nx * id;
+    size_t nbrBoxes_offset = (nbrBoxes_nx/nNbrBoxes) * id;
     nbrBoxes_nx     /= nNbrBoxes;
-    iOff_offset = U_nx * id;
+    size_t iOff_offset = U_nx * id;
     //iOff_offset     /= sizeof(real_t);
 
     // int n_threads = STARPU_MIN(MAXTHREADS, nbrBoxes_nx);
     // int loops_per_thread = (nbrBoxes_nx + n_threads - 1) / n_threads;
     
-	do_ljForce<<<1, 1, 0, starpu_cuda_get_local_stream()>>>(s6, eShift, epsilon, rCut2, nNbrBoxes, nLocalBoxes, nbrBoxes, nAtoms, r, f, U, ePot, nbrBoxes_offset, nbrBoxes_nx, iOff_offset);
+	do_ljForce<<<1, nbrBoxes_nx, nbrBoxes_nx * sizeof(real_t), starpu_cuda_get_local_stream()>>>(s6, eShift, epsilon, rCut2, nNbrBoxes, nLocalBoxes, nbrBoxes, nAtoms, r, f, U, ePot, nbrBoxes_offset, nbrBoxes_nx, iOff_offset);
     cudaError_t cures = cudaStreamSynchronize(starpu_cuda_get_local_stream());
 	if (cures)
 		STARPU_CUDA_REPORT_ERROR(cures);
