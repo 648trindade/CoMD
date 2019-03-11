@@ -73,6 +73,8 @@
 #include "memUtils.h"
 #include "CoMDTypes.h"
 
+#include "adaptative-par.h"
+
 #define POT_SHIFT 1.0
 
 /// Derived struct for a Lennard Jones potential.
@@ -142,7 +144,8 @@ void ljPrint(FILE* file, BasePotential* pot)
    fprintf(file, "  Sigma            : "FMT1" Angstroms\n", ljPot->sigma);
 }
 
-real_t ljForce_kernel(int f_iBox, int l_iBox, SimFlat* s){
+double ljForce_kernel(void* data, int f_iBox, int l_iBox){
+   SimFlat* s = (SimFlat*)data;
    LjPotential* pot = (LjPotential *) s->pot;
    real_t sigma = pot->sigma;
    real_t epsilon = pot->epsilon;
@@ -208,77 +211,11 @@ real_t ljForce_kernel(int f_iBox, int l_iBox, SimFlat* s){
       } // loop over neighbor boxes
    } // loop over local boxes in system
 
-   return ePot;
+   return (double)ePot;
 }
 
-#include <math.h>
-
-typedef struct{
-   int f;
-   int l;
-   int m;
-} ws_data_t;
-
-#define MIN(a,b) ((a<=b)?a:b)
-#define MAX(a,b) ((a<=b)?b:a)
-#define ALPHA 1
-#define LOG2(X) (63 - __builtin_clzll(X))
-
-int extract_seq(ws_data_t* m_ws_data, int* f, int* l){
-   *f = m_ws_data->f;
-   *l = MIN(m_ws_data->l, *f + (int)(ALPHA * LOG2(m_ws_data->m)));
-   m_ws_data->f = *l;
-   //printf("Worker %d extract_seq %d a %d\n", omp_get_thread_num(), *f, *l);
-   return *l - *f;
-}
-
-int extract_par(ws_data_t* ws_data, int thr){
-   for (int i=0; i < omp_get_max_threads(); i++)
-      if (i != thr){
-         int m_left = ws_data[i].l - ws_data[i].f;
-         int min = (int)sqrt(ws_data[i].m);
-         if (m_left >= min){
-            int steal = MAX(m_left >> 1, min);
-            ws_data[thr].f = ws_data[ i ].l - steal;
-            ws_data[thr].l = ws_data[ i ].l;
-            ws_data[ i ].l = ws_data[thr].f;
-            ws_data[thr].m = ws_data[thr].l - ws_data[thr].f;
-            //printf("Worker %d extract_par %d a %d\n", thr, ws_data[thr].f, ws_data[thr].l);
-            return 1; //sucess
-         }
-      }
-   //printf("Worker %d sem trabalho disponivel\n", thr);
-   return 0; //not sucess
-}
-
-real_t ws_parallel_for_and_reduce(SimFlat* s, int f, int l){
-   ws_data_t* ws_data = comdMalloc(omp_get_max_threads() * sizeof(ws_data_t));
-   int chunk = (l - f) / omp_get_max_threads();
-   real_t ePot = 0.0;
-
-   #pragma omp parallel shared(s, ws_data, chunk, ePot) firstprivate(f, l)
-   {
-   int thr = omp_get_thread_num();
-   real_t t_ePot = 0.0;
-
-   ws_data_t* m_ws_data = &ws_data[thr];
-   m_ws_data->f = chunk * thr + f;
-   m_ws_data->l = MIN(m_ws_data->f + chunk, l);
-   m_ws_data->m = m_ws_data->l - m_ws_data->f;
-
-   while(1){
-      while (extract_seq(m_ws_data, &f, &l) > 0)
-         t_ePot += ljForce_kernel(f, l, s);
-      if (!extract_par(ws_data, thr))
-         break;
-   }
-
-   #pragma omp atomic
-   ePot += t_ePot;
-   }
-
-   comdFree(ws_data);
-   return ePot;
+double m_sum(double a, double b){
+   return (double)((real_t)a + (real_t)b);
 }
 
 int ljForce(SimFlat* s)
@@ -295,11 +232,9 @@ int ljForce(SimFlat* s)
       s->atoms->U[ii] = 0.;
    }
 
-   //printf("============ STARTING ==============\n");
    // loop over local boxes
-   //#pragma omp parallel for reduction(+:ePot)
-   //call kernel from 0 to s->boxes->nLocalBoxes
-   ePot = ws_parallel_for_and_reduce(s, 0, s->boxes->nLocalBoxes);
+   // call kernel from 0 to s->boxes->nLocalBoxes
+   ePot = adpt_parallel_for_and_reduce(ljForce_kernel, s, 0, s->boxes->nLocalBoxes, 0.0, m_sum);
 
    LjPotential* pot = (LjPotential *) s->pot;
    ePot = ePot*4.0*pot->epsilon;

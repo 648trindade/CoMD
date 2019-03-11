@@ -17,13 +17,14 @@ DO_MPI = OFF
 ### (such as -lm for the math library) put them in C_LIB.
 CROSS_COMPILE = ON
 CC = gcc
-CFLAGS = -std=c99 -fopenmp -static
+CFLAGS = -std=c99 -fopenmp
 OPTFLAGS = -g -O3
 INCLUDES = 
 C_LIB = -lm
 
 ifeq ($(CROSS_COMPILE), ON)
 CC = arm-linux-gnueabi-gcc
+CFLAGS += -static
 endif
 
 ### If you need to specify include paths, library paths, or link flags
