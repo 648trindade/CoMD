@@ -144,7 +144,7 @@ void ljPrint(FILE* file, BasePotential* pot)
    fprintf(file, "  Sigma            : "FMT1" Angstroms\n", ljPot->sigma);
 }
 
-double ljForce_kernel(void* data, int f_iBox, int l_iBox){
+double ljForce_kernel(void* data, size_t iBox){
    SimFlat* s = (SimFlat*)data;
    LjPotential* pot = (LjPotential *) s->pot;
    real_t sigma = pot->sigma;
@@ -160,62 +160,59 @@ double ljForce_kernel(void* data, int f_iBox, int l_iBox){
 
    int nNbrBoxes = 27;
 
-   for (int iBox=f_iBox; iBox<l_iBox; iBox++)
-   {
-      int nIBox = s->boxes->nAtoms[iBox];
-   
-      // loop over neighbors of iBox
-      for (int jTmp=0; jTmp<nNbrBoxes; jTmp++)
-      {
-         int jBox = s->boxes->nbrBoxes[iBox][jTmp];
-         
-         assert(jBox>=0);
-         
-         int nJBox = s->boxes->nAtoms[jBox];
-         
-         // loop over atoms in iBox
-         for (int iOff=MAXATOMS*iBox; iOff<(iBox*MAXATOMS+nIBox); iOff++)
-         {
+   int nIBox = s->boxes->nAtoms[iBox];
 
-            // loop over atoms in jBox
-            for (int jOff=jBox*MAXATOMS; jOff<(jBox*MAXATOMS+nJBox); jOff++)
+   // loop over neighbors of iBox
+   for (int jTmp=0; jTmp<nNbrBoxes; jTmp++)
+   {
+      int jBox = s->boxes->nbrBoxes[iBox][jTmp];
+      
+      assert(jBox>=0);
+      
+      int nJBox = s->boxes->nAtoms[jBox];
+      
+      // loop over atoms in iBox
+      for (int iOff=MAXATOMS*iBox; iOff<(iBox*MAXATOMS+nIBox); iOff++)
+      {
+
+         // loop over atoms in jBox
+         for (int jOff=jBox*MAXATOMS; jOff<(jBox*MAXATOMS+nJBox); jOff++)
+         {
+            real3 dr;
+            real_t r2 = 0.0;
+            for (int m=0; m<3; m++)
             {
-               real3 dr;
-               real_t r2 = 0.0;
+               dr[m] = s->atoms->r[iOff][m]-s->atoms->r[jOff][m];
+               r2+=dr[m]*dr[m];
+            }
+
+            if ( r2 <= rCut2 && r2 > 0.0)
+            {
+
+               // Important note:
+               // from this point on r actually refers to 1.0/r
+               r2 = 1.0/r2;
+               real_t r6 = s6 * (r2*r2*r2);
+               real_t eLocal = r6 * (r6 - 1.0) - eShift;
+               s->atoms->U[iOff] += 0.5*eLocal;
+               ePot += 0.5*eLocal;
+
+               // different formulation to avoid sqrt computation
+               real_t fr = - 4.0*epsilon*r6*r2*(12.0*r6 - 6.0);
                for (int m=0; m<3; m++)
                {
-                  dr[m] = s->atoms->r[iOff][m]-s->atoms->r[jOff][m];
-                  r2+=dr[m]*dr[m];
+                  s->atoms->f[iOff][m] -= dr[m]*fr;
                }
-
-               if ( r2 <= rCut2 && r2 > 0.0)
-               {
-
-                  // Important note:
-                  // from this point on r actually refers to 1.0/r
-                  r2 = 1.0/r2;
-                  real_t r6 = s6 * (r2*r2*r2);
-                  real_t eLocal = r6 * (r6 - 1.0) - eShift;
-                  s->atoms->U[iOff] += 0.5*eLocal;
-                  ePot += 0.5*eLocal;
-
-                  // different formulation to avoid sqrt computation
-                  real_t fr = - 4.0*epsilon*r6*r2*(12.0*r6 - 6.0);
-                  for (int m=0; m<3; m++)
-                  {
-                     s->atoms->f[iOff][m] -= dr[m]*fr;
-                  }
-               }
-            } // loop over atoms in jBox
-         } // loop over atoms in iBox
-      } // loop over neighbor boxes
-   } // loop over local boxes in system
+            }
+         } // loop over atoms in jBox
+      } // loop over atoms in iBox
+   } // loop over neighbor boxes
 
    return (double)ePot;
 }
 
-double m_sum(double a, double b){
-   return (double)((real_t)a + (real_t)b);
+inline double m_sum(double a, double b){
+   return a + b;
 }
 
 int ljForce(SimFlat* s)

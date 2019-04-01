@@ -11,10 +11,36 @@
 
 // Estrutura representando um intervalo
 typedef struct{
-    int f; // Início do intervalo
-    int l; // Fim do intervalo
-    int m; // Tamanho do intervalo
+    size_t f; // Início do intervalo
+    size_t l; // Fim do intervalo
+    size_t m; // Tamanho do intervalo
 } adpt_range_t;
+
+typedef struct {
+    size_t id;          // ID desta thread
+    adpt_range_t range; // intervalo
+    omp_lock_t lock;    // trava
+    char* visited;      // vetor de histórico de acesso
+} worker_data_t;
+
+
+void initialize_worker_data(worker_data_t* wrkr_d, size_t thr_id, size_t nthr, size_t first, size_t last){
+    wrkr_d->id = thr_id; // ID desta thread
+    wrkr_d->visited = malloc(nthr); // Vetor de vetores de histórico de acesso
+
+    size_t chunk = (last - first) / nthr; // Tamanho da tarefa inicial (divisão inteira)
+    size_t remain = (last - first) % nthr; // Sobras da divisão anterior
+    wrkr_d->range.f = chunk * thr_id + first + MIN(thr_id, remain); // Ponto inicial do intervalo
+    wrkr_d->range.l = wrkr_d->range.f + chunk + (size_t)(thr_id < remain); // Ponto final
+    wrkr_d->range.m = wrkr_d->range.l - wrkr_d->range.f;  // Tamanho original do intervalo
+
+    omp_init_lock(&(wrkr_d->lock)); // Inicializa a trava
+}
+
+void destroy_worker_data(worker_data_t* wrkr_d){
+    free(wrkr_d->visited);
+    omp_destroy_lock(&(wrkr_d->lock));
+}
 
 /*
  * Function: adpt_extract_seq
@@ -28,10 +54,10 @@ typedef struct{
  * 
  *   returns : o tamanho do intervalo extraído
  */
-int adpt_extract_seq(adpt_range_t* m_range, int* f, int* l){
-    *f = m_range->f;
-    *l = MIN(m_range->l, *f + (int)(ALPHA * LOG2(m_range->m)));
-    m_range->f = *l;
+size_t adpt_extract_seq(worker_data_t* wrkr_d, size_t* f, size_t* l){
+    *f = wrkr_d->range.f;
+    *l = MIN(wrkr_d->range.l, *f + (size_t)(ALPHA * LOG2(wrkr_d->range.m)));
+    wrkr_d->range.f = *l;
     // fprintf(stderr, "%.6lf [Worker %d] adpt_extract_seq %d a %d\n", omp_get_wtime(), omp_get_thread_num(), *f, *l);
     return *l - *f;
 }
@@ -56,46 +82,44 @@ int adpt_extract_seq(adpt_range_t* m_range, int* f, int* l){
  * 
  *   returns : 1 se o roubo for bem sucedido, 0 do contrário
  */
-int adpt_extract_par(
-    adpt_range_t* ranges, adpt_range_t* m_range, 
-    omp_lock_t* locks, char* m_visited, 
-    int nthr, int thr_id
+size_t adpt_extract_par(
+    worker_data_t* theft_d, worker_data_t* v_wrkr_d, size_t nthr
 ){
-    int success     = 0;
-    int remaining   = nthr - 1;
+    size_t success     = 0;
+    size_t remaining   = nthr - 1;
 
-    memset(m_visited, 0, nthr);
-    m_visited[thr_id] = 1;
+    memset(theft_d->visited, 0, nthr);
+    theft_d->visited[theft_d->id] = 1;
 
     // Enquanto houver intervalos que não foram inspecionadas
     while((remaining > 0) && !success){
-        int i = rand() % nthr; // Sorteia uma intervalo
-        while (m_visited[i] != 0) i = (i+1) % nthr; // Avança até um intervalo ainda não visto
-
+        size_t i = rand() % nthr; // Sorteia uma intervalo
+        while (theft_d->visited[i] != 0) i = (i+1) % nthr; // Avança até um intervalo ainda não visto
+        worker_data_t* victim_d = &(v_wrkr_d[i]);
         // Testa se o intervalo não está travado e trava se estiver livre.
         // omp_test_lock é uma chamada não-bloqueante
-        if (omp_test_lock(&locks[i])){
-            int m_left = ranges[i].l - ranges[i].f;  // Calcula o trabalho restante
-            int min    = sqrt(ranges[i].m);          // Calcula o tamanho mínimo para roubo
-            int steal_size  = MAX(m_left >> 1, min); // Calcula o tamanho do roubo
+        if (omp_test_lock(&(victim_d->lock))){
+            size_t m_left = victim_d->range.l - victim_d->range.f;  // Calcula o trabalho restante
+            size_t min    = sqrt(victim_d->range.m);          // Calcula o tamanho mínimo para roubo
+            size_t steal_size  = MAX(m_left >> 1, min); // Calcula o tamanho do roubo
 
             // Testa se o restante é maior ou igual ao mínimo a ser roubado
             // FIX: não roubar se falta só um.
             if ((m_left >= min) && (steal_size > 1)){
                 // Efetua o roubo, atualizando os intervalos
-                m_range->f  = ranges[i].l - steal_size;
-                m_range->l  = ranges[i].l;
-                ranges[i].l = m_range->f;
-                m_range->m  = m_range->l - m_range->f;
+                theft_d->range.f  = victim_d->range.l - steal_size;
+                theft_d->range.l  = victim_d->range.l;
+                victim_d->range.l = theft_d->range.f;
+                theft_d->range.m  = theft_d->range.l - theft_d->range.f;
                 
                 // fprintf(stderr, "%.6lf [Worker %d] adpt_extract_par %d a %d\n", omp_get_wtime(), thr_id, m_range->f, m_range->l);
                 success = 1;
             }
             else { // Caso não houver trabalho suficiente
-                m_visited[i] = 1; // Marca como visitado
+                theft_d->visited[i] = 1; // Marca como visitado
                 --remaining;      // Decrementa o total de intervalos restantes para inspeção
             }
-            omp_unset_lock(&locks[i]); // Destrava o intervalo
+            omp_unset_lock(&(victim_d->lock)); // Destrava o intervalo
         }
     }
     // if (!success)
@@ -117,46 +141,56 @@ int adpt_extract_par(
  *   returns : o valor reduzido
  */
 double adpt_parallel_for_and_reduce(
-    double (*kernel)(void*, int, int), void* data, int first, int last, 
+    double (*kernel)(void*, size_t), void* data, size_t first, size_t last, 
     double start_value, double (*rdct_fun)(double, double)
 ){
-    adpt_range_t* ranges;  // Vetor de intervalos (uma por thread)
-    omp_lock_t*   locks;   // Vetor de travas (uma por thread)
-    char*         visited; // Vetor de vetores de histórico de acesso (1 por thread)
-    int           nthr;    // Número de threads
-    double        rdct_var = start_value; // Variável de redução
+    // adpt_range_t* ranges;  // Vetor de intervalos (uma por thread)
+    // omp_lock_t*   locks;   // Vetor de travas (uma por thread)
+    // char*         visited; // Vetor de vetores de histórico de acesso (1 por thread)
+    // size_t           nthr;    // Número de threads
+    // double        rdct_var = start_value; // Variável de redução
 
-    nthr    = omp_get_max_threads();
-    ranges  = malloc(nthr * sizeof(adpt_range_t));
-    locks   = malloc(nthr * sizeof(omp_lock_t));
-    visited = malloc(nthr * nthr);
+    // nthr    = omp_get_max_threads();
+    // ranges  = malloc(nthr * sizeof(adpt_range_t));
+    // locks   = malloc(nthr * sizeof(omp_lock_t));
+    // visited = malloc(nthr * nthr);
+
+    size_t nthr = omp_get_max_threads(); // número de threads
+    worker_data_t* workers_data = malloc(nthr * sizeof(worker_data_t)); // Dados para os workers
+    double rdct_var = start_value; // Variável de redução
 
     // fprintf(stderr, "%.6lf ============ STARTING ==============\n", omp_get_wtime());
-    #pragma omp parallel shared(data, ranges, locks, visited, nthr, rdct_var) firstprivate(first, last)
+    #pragma omp parallel shared(kernel, data, start_value, rdct_fun, workers_data, nthr, first, last, rdct_var)
     {
-        int           thr_id     = omp_get_thread_num();      // ID desta thread
-        adpt_range_t* m_range    = &ranges[thr_id];           // Intervalo desta thread
-        omp_lock_t*   m_lock     = &locks[thr_id];            // Trava desta thread
-        char*         m_visited  = visited + (thr_id * nthr); // Vetor de histórico desta thread
-        int           chunk      = (last - first) / nthr;     // Tamanho da tarefa inicial
-        double        m_rdct_var = start_value;
+        // size_t           thr_id     = omp_get_thread_num();      // ID desta thread
+        // adpt_range_t* m_range    = &ranges[thr_id];           // intervalo desta thread
+        // omp_lock_t*   m_lock     = &locks[thr_id];            // Trava desta thread
+        // char*         m_visited  = visited + (thr_id * nthr); // Vetor de histórico desta thread
+        // size_t           chunk      = (last - first) / nthr;     // Tamanho da tarefa inicial
+        // double        m_rdct_var = start_value;
         
-        m_range->f = chunk * thr_id + first;        // Cálculo do ponto inicial do intervalo
-        m_range->l = MIN(m_range->f + chunk, last); // Cálculo do ponto final do intervalo
-        m_range->m = m_range->l - m_range->f;       // Cálculo do tamanho original do intervalo
+        // m_range->f = chunk * thr_id + first;        // Cálculo do ponto inicial do intervalo
+        // m_range->l = MIN(m_range->f + chunk, last); // Cálculo do ponto final do intervalo
+        // m_range->m = m_range->l - m_range->f;       // Cálculo do tamanho original do intervalo
 
-        omp_init_lock(m_lock); // Inicializa a trava
+        // omp_init_lock(m_lock); // Inicializa a trava
+
+        size_t m_first = first, m_last = last; // cópia dos limites originais
+        double m_rdct_var = start_value;
+        size_t thr_id = omp_get_thread_num();  // ID desta thread
+        worker_data_t* m_worker_data = &workers_data[thr_id]; // pega o worker desta thread
+        initialize_worker_data(m_worker_data, thr_id, nthr, first, last); // inicia o worker
         #pragma omp barrier
 
-        // Itera enquanto houver trabalho a ser feito
-        while(1){
+        while(1){ // Itera enquanto houver trabalho a ser feito
             // Itera enquanto houver trabalho sequencial a ser feito
-            while (adpt_extract_seq(m_range, &first, &last) > 0)
-                // Chama o kernel da aplicação e aplica redução no resultado retornado
-                m_rdct_var = rdct_fun(m_rdct_var, kernel(data, first, last));
+            while (adpt_extract_seq(m_worker_data, &first, &last) > 0)
+                for (size_t i = first; i < last; i++)
+                    // Chama o kernel da aplicação e aplica redução no resultado retornado
+                    m_rdct_var = rdct_fun(m_rdct_var, kernel(data, i));
             
             // Tenta roubar trabalho, se não conseguir, sai do laço
-            if (!adpt_extract_par(ranges, m_range, locks, m_visited, nthr, thr_id))
+            if (!adpt_extract_par(m_worker_data, workers_data, nthr))
                 break;
         }
 
@@ -164,12 +198,10 @@ double adpt_parallel_for_and_reduce(
         rdct_var = rdct_fun(rdct_var, m_rdct_var); // Reduz os resultados por thread
 
         #pragma omp barrier
-        omp_destroy_lock(m_lock); // Destrói a trava
+        destroy_worker_data(m_worker_data); // Destrói a trava
     }
 
-    free(ranges);
-    free(visited);
-    free(locks);
+    free(workers_data);
     return rdct_var;
 }
 
@@ -182,49 +214,32 @@ double adpt_parallel_for_and_reduce(
  *    first : início do laço
  */
 void adpt_parallel_for(
-    void (*kernel)(void*, int, int), void* data, int first, int last
+    void (*kernel)(void*, size_t), void* data, size_t first, size_t last
 ){
-    adpt_range_t* ranges;  // Vetor de intervalos (uma por thread)
-    omp_lock_t*   locks;   // Vetor de travas (uma por thread)
-    char* visited;         // Matriz de histórico de acesso (1 linha por thread)
-    int   nthr;            // Número de threads
+    size_t nthr = omp_get_max_threads(); // número de threads
+    worker_data_t* workers_data = malloc(nthr * sizeof(worker_data_t)); // Dados para os workers
 
-    nthr    = omp_get_max_threads();
-    ranges  = malloc(nthr * sizeof(adpt_range_t));
-    locks   = malloc(nthr * sizeof(omp_lock_t));
-    visited = malloc(nthr * nthr);
-
-    #pragma omp parallel shared(data, ranges, locks, visited, nthr) firstprivate(first, last)
+    #pragma omp parallel shared(kernel, data, workers_data, nthr, first, last)
     {
-        int           thr_id     = omp_get_thread_num();      // ID desta thread
-        adpt_range_t* m_range    = &ranges[thr_id];           // Intervalo desta thread
-        omp_lock_t*   m_lock     = &locks[thr_id];            // Trava desta thread
-        char*         m_visited  = visited + (thr_id * nthr); // Vetor de histórico desta thread
-        int           chunk      = (last - first) / nthr;     // Tamanho da tarefa inicial
-        
-        m_range->f = chunk * thr_id + first;        // Cálculo do ponto inicial do intervalo
-        m_range->l = MIN(m_range->f + chunk, last); // Cálculo do ponto final do intervalo
-        m_range->m = m_range->l - m_range->f;       // Cálculo do tamanho original do intervalo
-
-        omp_init_lock(m_lock); // Inicializa a trava
+        size_t m_first = first, m_last = last; // cópia dos limites originais
+        size_t thr_id = omp_get_thread_num();  // ID desta thread
+        worker_data_t* m_worker_data = &workers_data[thr_id]; // pega o worker desta thread
+        initialize_worker_data(m_worker_data, thr_id, nthr, first, last); // inicia o worker
         #pragma omp barrier
 
-        // Itera enquanto houver trabalho a ser feito
-        while(1){
+        while(1){ // Itera enquanto houver trabalho a ser feito
             // Itera enquanto houver trabalho sequencial a ser feito
-            while (adpt_extract_seq(m_range, &first, &last) > 0)
-                kernel(data, first, last);
+            while (adpt_extract_seq(m_worker_data, &m_first, &m_last) > 0)
+                for (size_t i = m_first; i < m_last; i++)
+                    kernel(data, i);
             
             // Tenta roubar trabalho, se não conseguir, sai do laço
-            if (!adpt_extract_par(ranges, m_range, locks, m_visited, nthr, thr_id))
+            if (!adpt_extract_par(m_worker_data, workers_data, nthr))
                 break;
         }
 
         #pragma omp barrier
-        omp_destroy_lock(m_lock); // Destrói a trava
+        destroy_worker_data(m_worker_data); // Limpa o worker
     }
-
-    free(ranges);
-    free(visited);
-    free(locks);
+    free(workers_data);
 }
