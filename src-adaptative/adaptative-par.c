@@ -24,6 +24,7 @@ typedef struct {
     char* visited;      // vetor de histórico de acesso
 } worker_data_t;
 
+int count = 0;
 
 void initialize_worker_data(worker_data_t* wrkr_d, size_t thr_id, size_t nthr, size_t first, size_t last){
     wrkr_d->id = thr_id; // ID desta thread
@@ -119,7 +120,7 @@ size_t adpt_extract_par(
             size_t begin = vic_l - steal_size;
 
             // O restante é maior ou igual ao mínimo a ser roubado?
-            if ((m_left > min) && (steal_size > 1)){
+            if ((m_left > min) && (steal_size > 1) && (vic_f < vic_l)){
                 victim_d->range.l = begin;
                 if (victim_d->range.f < begin){ // Inicio a frente do inicio da vitima
                     // ativa a própria trava pra ninguém roubar dele enquanto ele rouba
@@ -272,4 +273,9 @@ void adpt_parallel_for(
         destroy_worker_data(m_worker_data); // Limpa o worker
     }
     free(workers_data);
+
+    if (count){
+        printf("Counter: %d\n", count);
+        count = 0;
+    }
 }
