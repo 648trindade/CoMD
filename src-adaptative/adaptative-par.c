@@ -17,14 +17,25 @@ typedef struct{
     size_t c; // Tamanho do chunk
 } adpt_range_t;
 
+#ifdef ADPT_DEBUG
+typedef struct {
+    double time;
+    char type;
+    size_t f, l, wl;
+    int vid;
+} trace_t;
+#endif
+
 typedef struct {
     size_t id;          // ID desta thread
     adpt_range_t range; // intervalo
     omp_lock_t lock;    // trava
     char* visited;      // vetor de histórico de acesso
+#ifdef ADPT_DEBUG
+    size_t counter;
+    trace_t history[250];
+#endif
 } worker_data_t;
-
-int count = 0;
 
 void initialize_worker_data(worker_data_t* wrkr_d, size_t thr_id, size_t nthr, size_t first, size_t last){
     wrkr_d->id = thr_id; // ID desta thread
@@ -36,6 +47,10 @@ void initialize_worker_data(worker_data_t* wrkr_d, size_t thr_id, size_t nthr, s
     wrkr_d->range.l = wrkr_d->range.f + chunk + (size_t)(thr_id < remain); // Ponto final
     wrkr_d->range.m = wrkr_d->range.l - wrkr_d->range.f;  // Tamanho original do intervalo
     wrkr_d->range.c = LOG2(wrkr_d->range.m); // Tamanho do chunk a ser extraído serialmente
+
+#ifdef ADPT_DEBUG
+    wrkr_d->counter = 0;
+#endif
 
     omp_init_lock(&(wrkr_d->lock)); // Inicializa a trava
 }
@@ -64,15 +79,20 @@ size_t adpt_extract_seq(worker_data_t* wrkr_d, size_t* f, size_t* l){
         *f = wrkr_d->range.f;
         *l = MIN(wrkr_d->range.l, *f + (size_t)(ALPHA * wrkr_d->range.c));
         wrkr_d->range.f = *l;
-        if (wrkr_d->range.f > wrkr_d->range.l) { // Conflito: desfaz e tenta de novo
-            wrkr_d->range.f = *f;
+        
+        if ((wrkr_d->range.f > wrkr_d->range.l) || (*l < *f)) { // Conflito
+            omp_set_lock(&(wrkr_d->lock));
+            //wrkr_d->range.f = *f; // desfaz e tenta de novo
+            *l = MIN(wrkr_d->range.l, *f + (size_t)(ALPHA * wrkr_d->range.c));
+            wrkr_d->range.f = *l;
+            omp_unset_lock(&(wrkr_d->lock));
 #ifdef ADPT_DEBUG
-            fprintf(stderr, "%.6lf [Worker %d] conflitou ao extrair trabalho\n", omp_get_wtime(), wrkr_d->id);
+            wrkr_d->history[wrkr_d->counter++] = (trace_t){omp_get_wtime(), 'x', 0, 0, 0, 0};
 #endif
-            continue;
+            //continue;
         }
 #ifdef ADPT_DEBUG
-        fprintf(stderr, "%.6lf [Worker %d] adpt_extract_seq %d a %d (%d)\n", omp_get_wtime(), omp_get_thread_num(), *f, *l, wrkr_d->range.l);
+        wrkr_d->history[wrkr_d->counter++] = (trace_t){omp_get_wtime(), 's', *f, *l, wrkr_d->range.l, 0};
 #endif
         return *l - *f;
     }
@@ -114,29 +134,36 @@ size_t adpt_extract_par(
         // Testa se o intervalo não está travado e trava se estiver livre.
         if (omp_test_lock(&(victim_d->lock))){
             size_t vic_l = victim_d->range.l, vic_f = victim_d->range.f; // cópias
-            size_t m_left = vic_l - vic_f; // Trabalho restante
+            size_t half_left = (vic_l - vic_f) >> 1; // Trabalho restante
             size_t min = (size_t)sqrt(victim_d->range.m); // Tamanho mínimo para roubo
-            size_t steal_size = MAX(m_left >> 1, min); // Tamanho do roubo
+            size_t steal_size = MAX(half_left, min); // Tamanho do roubo
             size_t begin = vic_l - steal_size;
 
-            // O restante é maior ou igual ao mínimo a ser roubado?
-            if ((m_left > min) && (steal_size > 1) && (vic_f < vic_l)){
+            // Três testes importantes a serem feitos:
+            // O trabalho que falta é maior que o roubo mínimo? - Não roubar todo o trabalho restante
+            // O tamanho do roubo é maior que 1? - log2(1) é 0 - problema talvez solucionado em 38
+            // O início é menor que o final para a vítima? - evita erros com conflitos e integer overflow
+            if ((half_left >= min) && (steal_size > 1) && (vic_f < vic_l)){
                 victim_d->range.l = begin;
-                if (victim_d->range.f < begin){ // Inicio a frente do inicio da vitima
+                if (victim_d->range.f <= begin){ // Inicio a frente do inicio da vitima
                     // ativa a própria trava pra ninguém roubar dele enquanto ele rouba
                     omp_set_lock(&(theft_d->lock));
                     // Efetua o roubo, atualizando os intervalos
-                    theft_d->range.f  = begin;
-                    theft_d->range.l  = vic_l;
-                    theft_d->range.m  = steal_size;
+                    theft_d->range.f = begin;
+                    theft_d->range.l = vic_l;
+                    theft_d->range.m = steal_size;
+                    theft_d->range.c = LOG2(steal_size);
+#ifdef ADPT_DEBUG
+                    theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'p', theft_d->range.f, theft_d->range.l, 0, i};
+#endif
                     omp_unset_lock(&(theft_d->lock));
                     success = 1;
                 }
                 else{ // Conflito: desfaz e aborta
                     victim_d->range.l = vic_l;
 #ifdef ADPT_DEBUG
-                    fprintf(stderr, "%.6lf [Worker %d] conflitou ao roubar de %lu\n", omp_get_wtime(), theft_d->id, i);
-#endif
+                    theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'c', 0, 0, 0, i};
+#endif  
                 }
             }
             else { // Caso não houver trabalho suficiente
@@ -147,10 +174,8 @@ size_t adpt_extract_par(
         }
     }
 #ifdef ADPT_DEBUG
-    if (success)
-        fprintf(stderr, "%.6lf [Worker %d] adpt_extract_par %d a %d de %lu\n", omp_get_wtime(), theft_d->id, theft_d->range.f, theft_d->range.l, i);
-    else
-        fprintf(stderr, "%.6lf [Worker %d] sem trabalho disponivel\n", omp_get_wtime(), theft_d->id);
+    if (!success)
+        theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'e', 0, 0, 0, 0};
 #endif
     return success;
 }
@@ -172,37 +197,13 @@ double adpt_parallel_for_and_reduce(
     double (*kernel)(void*, size_t), void* data, size_t first, size_t last, 
     double start_value, double (*rdct_fun)(double, double)
 ){
-    // adpt_range_t* ranges;  // Vetor de intervalos (uma por thread)
-    // omp_lock_t*   locks;   // Vetor de travas (uma por thread)
-    // char*         visited; // Vetor de vetores de histórico de acesso (1 por thread)
-    // size_t           nthr;    // Número de threads
-    // double        rdct_var = start_value; // Variável de redução
-
-    // nthr    = omp_get_max_threads();
-    // ranges  = malloc(nthr * sizeof(adpt_range_t));
-    // locks   = malloc(nthr * sizeof(omp_lock_t));
-    // visited = malloc(nthr * nthr);
-
     size_t nthr = omp_get_max_threads(); // número de threads
     worker_data_t* workers_data = malloc(nthr * sizeof(worker_data_t)); // Dados para os workers
     double rdct_var = start_value; // Variável de redução
 
-    // fprintf(stderr, "%.6lf ============ STARTING ==============\n", omp_get_wtime());
+    // fprintf(stderr, "%.8lf ============ STARTING ==============\n", omp_get_wtime());
     #pragma omp parallel shared(kernel, data, start_value, rdct_fun, workers_data, nthr, first, last, rdct_var)
     {
-        // size_t           thr_id     = omp_get_thread_num();      // ID desta thread
-        // adpt_range_t* m_range    = &ranges[thr_id];           // intervalo desta thread
-        // omp_lock_t*   m_lock     = &locks[thr_id];            // Trava desta thread
-        // char*         m_visited  = visited + (thr_id * nthr); // Vetor de histórico desta thread
-        // size_t           chunk      = (last - first) / nthr;     // Tamanho da tarefa inicial
-        // double        m_rdct_var = start_value;
-        
-        // m_range->f = chunk * thr_id + first;        // Cálculo do ponto inicial do intervalo
-        // m_range->l = MIN(m_range->f + chunk, last); // Cálculo do ponto final do intervalo
-        // m_range->m = m_range->l - m_range->f;       // Cálculo do tamanho original do intervalo
-
-        // omp_init_lock(m_lock); // Inicializa a trava
-
         size_t m_first = first, m_last = last; // cópia dos limites originais
         double m_rdct_var = start_value;
         size_t thr_id = omp_get_thread_num();  // ID desta thread
@@ -248,7 +249,7 @@ void adpt_parallel_for(
     worker_data_t* workers_data = malloc(nthr * sizeof(worker_data_t)); // Dados para os workers
 
 #ifdef ADPT_DEBUG
-    fprintf(stderr, "%.6lf ============ STARTING ==============\n", omp_get_wtime());
+    fprintf(stderr, "%.8lf ============ STARTING ==============\n", omp_get_wtime());
 #endif
     #pragma omp parallel shared(kernel, data, workers_data, nthr, first, last)
     {
@@ -272,10 +273,23 @@ void adpt_parallel_for(
         #pragma omp barrier
         destroy_worker_data(m_worker_data); // Limpa o worker
     }
-    free(workers_data);
 
-    if (count){
-        printf("Counter: %d\n", count);
-        count = 0;
-    }
+#ifdef ADPT_DEBUG
+    for (size_t i=0; i<nthr; i++)
+        for (size_t j=0; j<workers_data[i].counter; j++) {
+            if (workers_data[i].history[j].type == 's')
+                fprintf(stderr, "%.8lf [Worker %lu] seq %lu a %lu (%lu)\n", workers_data[i].history[j].time, i, workers_data[i].history[j].f, workers_data[i].history[j].l, workers_data[i].history[j].wl);
+            else if (workers_data[i].history[j].type == 'p')
+                fprintf(stderr, "%.8lf [Worker %lu] PAR %lu a %lu de %d\n", workers_data[i].history[j].time, i, workers_data[i].history[j].f, workers_data[i].history[j].l, workers_data[i].history[j].vid);
+            else if (workers_data[i].history[j].type == 'x')
+                fprintf(stderr, "%.8lf [Worker %lu] conflitou ao extrair trabalho\n", workers_data[i].history[j].time, i);
+            else if (workers_data[i].history[j].type == 'c')
+                fprintf(stderr, "%.8lf [Worker %lu] conflitou ao roubar de %d\n", workers_data[i].history[j].time, i, workers_data[i].history[j].vid);
+            else //=='e'
+                fprintf(stderr, "%.8lf [Worker %lu] sem trabalho disponivel\n", workers_data[i].history[j].time, i);
+
+        }
+#endif
+
+    free(workers_data);
 }
