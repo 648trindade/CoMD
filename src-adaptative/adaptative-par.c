@@ -3,6 +3,7 @@
 #include <omp.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define MIN(a,b) ((a<=b)?a:b)
 #define MAX(a,b) ((a<=b)?b:a)
@@ -15,6 +16,7 @@ typedef struct{
     size_t l; // Fim do intervalo
     size_t m; // Tamanho do intervalo
     size_t c; // Tamanho do chunk
+    size_t r; // Raiz quadrada do tamanho total
 } adpt_range_t;
 
 #ifdef ADPT_DEBUG
@@ -47,6 +49,7 @@ void initialize_worker_data(worker_data_t* wrkr_d, size_t thr_id, size_t nthr, s
     wrkr_d->range.l = wrkr_d->range.f + chunk + (size_t)(thr_id < remain); // Ponto final
     wrkr_d->range.m = wrkr_d->range.l - wrkr_d->range.f;  // Tamanho original do intervalo
     wrkr_d->range.c = LOG2(wrkr_d->range.m); // Tamanho do chunk a ser extraído serialmente
+    wrkr_d->range.r = (size_t)sqrt(wrkr_d->range.m); // Tamanho mínimo a ser roubado
 
 #ifdef ADPT_DEBUG
     wrkr_d->counter = 0;
@@ -118,41 +121,45 @@ size_t adpt_extract_seq(worker_data_t* wrkr_d, size_t* f, size_t* l){
 size_t adpt_extract_par(
     worker_data_t* theft_d, worker_data_t* v_wrkr_d, size_t nthr
 ){
-    size_t success     = 0;
-    size_t remaining   = nthr - 1;
+    size_t success   = 0;
+    size_t remaining = nthr - 1;
     size_t i;
 
     memset(theft_d->visited, 0, nthr);
     theft_d->visited[theft_d->id] = 1;
 
     // Enquanto houver intervalos que não foram inspecionadas
-    while((remaining > 0) && !success){
+    while(remaining && !success){
         i = rand() % nthr; // Sorteia uma intervalo
         for (; theft_d->visited[i]; i = (i+1)%nthr); // Avança até um intervalo ainda não visto
         worker_data_t* victim_d = &(v_wrkr_d[i]);
 
         // Testa se o intervalo não está travado e trava se estiver livre.
         if (omp_test_lock(&(victim_d->lock))){
+#ifdef ADPT_DEBUG
+            theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'l', 0, 0, 0, i};
+#endif
             size_t vic_l = victim_d->range.l, vic_f = victim_d->range.f; // cópias
             size_t half_left = (vic_l - vic_f) >> 1; // Trabalho restante
-            size_t min = (size_t)sqrt(victim_d->range.m); // Tamanho mínimo para roubo
-            size_t steal_size = MAX(half_left, min); // Tamanho do roubo
+            //size_t min = (size_t)sqrt(victim_d->range.m); // Tamanho mínimo para roubo
+            //size_t steal_size = MAX(half_left, victim_d->range.r); // Tamanho do roubo
+            size_t steal_size = (half_left >= victim_d->range.r) ? half_left : 0; // Tamanho do roubo
             size_t begin = vic_l - steal_size;
 
             // Três testes importantes a serem feitos:
-            // O trabalho que falta é maior que o roubo mínimo? - Não roubar todo o trabalho restante
             // O tamanho do roubo é maior que 1? - log2(1) é 0 - problema talvez solucionado em 38
             // O início é menor que o final para a vítima? - evita erros com conflitos e integer overflow
-            if ((half_left >= min) && (steal_size > 1) && (vic_f < vic_l)){
-                victim_d->range.l = begin;
-                if (victim_d->range.f <= begin){ // Inicio a frente do inicio da vitima
-                    // ativa a própria trava pra ninguém roubar dele enquanto ele rouba
-                    omp_set_lock(&(theft_d->lock));
+            if ((steal_size > 1) && (vic_f < vic_l)){
+                victim_d->range.l = begin; // <= begin
+                if (victim_d->range.f <= victim_d->range.l){ // Inicio a frente do inicio da vitima
                     // Efetua o roubo, atualizando os intervalos
-                    theft_d->range.f = begin;
+                    //theft_d->range.f = SIZE_MAX; // impede roubos sem uma de trava (f > l)
+                    omp_set_lock(&(theft_d->lock));
                     theft_d->range.l = vic_l;
+                    theft_d->range.f = begin;
                     theft_d->range.m = steal_size;
                     theft_d->range.c = LOG2(steal_size);
+                    theft_d->range.r = (size_t)sqrt(steal_size);
 #ifdef ADPT_DEBUG
                     theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'p', theft_d->range.f, theft_d->range.l, 0, i};
 #endif
@@ -162,7 +169,7 @@ size_t adpt_extract_par(
                 else{ // Conflito: desfaz e aborta
                     victim_d->range.l = vic_l;
 #ifdef ADPT_DEBUG
-                    theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'c', 0, 0, 0, i};
+                    theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'c', vic_f, vic_l, 0, i};
 #endif  
                 }
             }
@@ -277,16 +284,19 @@ void adpt_parallel_for(
 #ifdef ADPT_DEBUG
     for (size_t i=0; i<nthr; i++)
         for (size_t j=0; j<workers_data[i].counter; j++) {
-            if (workers_data[i].history[j].type == 's')
-                fprintf(stderr, "%.8lf [Worker %lu] seq %lu a %lu (%lu)\n", workers_data[i].history[j].time, i, workers_data[i].history[j].f, workers_data[i].history[j].l, workers_data[i].history[j].wl);
-            else if (workers_data[i].history[j].type == 'p')
-                fprintf(stderr, "%.8lf [Worker %lu] PAR %lu a %lu de %d\n", workers_data[i].history[j].time, i, workers_data[i].history[j].f, workers_data[i].history[j].l, workers_data[i].history[j].vid);
-            else if (workers_data[i].history[j].type == 'x')
-                fprintf(stderr, "%.8lf [Worker %lu] conflitou ao extrair trabalho\n", workers_data[i].history[j].time, i);
-            else if (workers_data[i].history[j].type == 'c')
-                fprintf(stderr, "%.8lf [Worker %lu] conflitou ao roubar de %d\n", workers_data[i].history[j].time, i, workers_data[i].history[j].vid);
+            trace_t trace = workers_data[i].history[j];
+            if (trace.type == 's')
+                fprintf(stderr, "%.8lf [Worker %lu] seq %lu a %lu (%lu)\n", trace.time, i, trace.f, trace.l, trace.wl);
+            else if (trace.type == 'p')
+                fprintf(stderr, "%.8lf [Worker %lu] PAR %lu a %lu de %d\n", trace.time, i, trace.f, trace.l, trace.vid);
+            else if (trace.type == 'x')
+                fprintf(stderr, "%.8lf [Worker %lu] conflict seq\n", trace.time, i);
+            else if (trace.type == 'c')
+                fprintf(stderr, "%.8lf [Worker %lu] conflict PAR %lu a %lu de %d\n", trace.time, i, trace.f, trace.l, trace.vid);
+            else if (trace.type == 'l')
+                fprintf(stderr, "%.8lf [Worker %lu] lock PAR %d\n", trace.time, i, trace.vid);
             else //=='e'
-                fprintf(stderr, "%.8lf [Worker %lu] sem trabalho disponivel\n", workers_data[i].history[j].time, i);
+                fprintf(stderr, "%.8lf [Worker %lu] sem trabalho disponivel\n", trace.time, i);
 
         }
 #endif
