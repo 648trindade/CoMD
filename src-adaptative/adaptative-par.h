@@ -9,7 +9,7 @@ double adpt_parallel_for_and_reduce(
 );
 
 void adpt_parallel_for(
-    void (*kernel)(void*, size_t), void* data, size_t first, size_t last
+    void (*kernel)(void*, size_t), void* data, size_t first, size_t last, FILE* trace_file
 );
 
 #endif //ADAPTATIVEPAR_H_

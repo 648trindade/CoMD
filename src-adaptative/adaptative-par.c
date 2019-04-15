@@ -20,9 +20,14 @@ typedef struct{
 } adpt_range_t;
 
 #ifdef ADPT_DEBUG
+
+typedef enum {
+    EXTRACT_SEQ, EXTRACT_PAR, CONFLICT, WORK, EXTRACT_SEQ_LOCK, NO_WORK_LEFT
+} ttype_t;
+
 typedef struct {
-    double time;
-    char type;
+    double start_time, end_time;
+    ttype_t type;
     size_t f, l, wl;
     int vid;
 } trace_t;
@@ -35,7 +40,7 @@ typedef struct {
     char* visited;      // vetor de histórico de acesso
 #ifdef ADPT_DEBUG
     size_t counter;
-    trace_t history[250];
+    trace_t history[500];
 #endif
 } worker_data_t;
 
@@ -78,27 +83,28 @@ void destroy_worker_data(worker_data_t* wrkr_d){
  *   returns : o tamanho do intervalo extraído
  */
 size_t adpt_extract_seq(worker_data_t* wrkr_d, size_t* f, size_t* l){
-    while(1) {
-        *f = wrkr_d->range.f;
+#ifdef ADPT_DEBUG
+    double start_time = omp_get_wtime();
+    int lock_used = 0;
+#endif
+    *f = wrkr_d->range.f;
+    *l = MIN(wrkr_d->range.l, *f + (size_t)(ALPHA * wrkr_d->range.c));
+    wrkr_d->range.f = *l;
+    
+    if ((wrkr_d->range.f > wrkr_d->range.l) || (*l < *f)) { // Conflito
+        omp_set_lock(&(wrkr_d->lock));
+        //wrkr_d->range.f = *f; // desfaz e tenta de novo
         *l = MIN(wrkr_d->range.l, *f + (size_t)(ALPHA * wrkr_d->range.c));
         wrkr_d->range.f = *l;
-        
-        if ((wrkr_d->range.f > wrkr_d->range.l) || (*l < *f)) { // Conflito
-            omp_set_lock(&(wrkr_d->lock));
-            //wrkr_d->range.f = *f; // desfaz e tenta de novo
-            *l = MIN(wrkr_d->range.l, *f + (size_t)(ALPHA * wrkr_d->range.c));
-            wrkr_d->range.f = *l;
-            omp_unset_lock(&(wrkr_d->lock));
+        omp_unset_lock(&(wrkr_d->lock));
 #ifdef ADPT_DEBUG
-            wrkr_d->history[wrkr_d->counter++] = (trace_t){omp_get_wtime(), 'x', 0, 0, 0, 0};
+        lock_used = 1;
 #endif
-            //continue;
-        }
-#ifdef ADPT_DEBUG
-        wrkr_d->history[wrkr_d->counter++] = (trace_t){omp_get_wtime(), 's', *f, *l, wrkr_d->range.l, 0};
-#endif
-        return *l - *f;
     }
+#ifdef ADPT_DEBUG
+    wrkr_d->history[wrkr_d->counter++] = (trace_t){start_time, omp_get_wtime(), (lock_used)?EXTRACT_SEQ_LOCK:EXTRACT_SEQ, *f, *l, wrkr_d->range.l, lock_used};
+#endif
+    return *l - *f;
 }
 
 /*
@@ -121,6 +127,9 @@ size_t adpt_extract_seq(worker_data_t* wrkr_d, size_t* f, size_t* l){
 size_t adpt_extract_par(
     worker_data_t* theft_d, worker_data_t* v_wrkr_d, size_t nthr
 ){
+#ifdef ADPT_DEBUG
+    double try_start_time = omp_get_wtime();
+#endif
     size_t success   = 0;
     size_t remaining = nthr - 1;
     size_t i;
@@ -137,7 +146,7 @@ size_t adpt_extract_par(
         // Testa se o intervalo não está travado e trava se estiver livre.
         if (omp_test_lock(&(victim_d->lock))){
 #ifdef ADPT_DEBUG
-            theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'l', 0, 0, 0, i};
+            double start_time = omp_get_wtime();
 #endif
             size_t vic_l = victim_d->range.l, vic_f = victim_d->range.f; // cópias
             size_t half_left = (vic_l - vic_f) >> 1; // Trabalho restante
@@ -161,7 +170,7 @@ size_t adpt_extract_par(
                     theft_d->range.c = LOG2(steal_size);
                     theft_d->range.r = (size_t)sqrt(steal_size);
 #ifdef ADPT_DEBUG
-                    theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'p', theft_d->range.f, theft_d->range.l, 0, i};
+                    theft_d->history[theft_d->counter++] = (trace_t){start_time, omp_get_wtime(), EXTRACT_PAR, theft_d->range.f, theft_d->range.l, 0, i};
 #endif
                     omp_unset_lock(&(theft_d->lock));
                     success = 1;
@@ -169,7 +178,7 @@ size_t adpt_extract_par(
                 else{ // Conflito: desfaz e aborta
                     victim_d->range.l = vic_l;
 #ifdef ADPT_DEBUG
-                    theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'c', vic_f, vic_l, 0, i};
+                    theft_d->history[theft_d->counter++] = (trace_t){start_time, omp_get_wtime(), CONFLICT, vic_f, vic_l, 0, i};
 #endif  
                 }
             }
@@ -182,7 +191,7 @@ size_t adpt_extract_par(
     }
 #ifdef ADPT_DEBUG
     if (!success)
-        theft_d->history[theft_d->counter++] = (trace_t){omp_get_wtime(), 'e', 0, 0, 0, 0};
+        theft_d->history[theft_d->counter++] = (trace_t){try_start_time, omp_get_wtime(), NO_WORK_LEFT, 0, 0, 0, 0};
 #endif
     return success;
 }
@@ -250,13 +259,13 @@ double adpt_parallel_for_and_reduce(
  *    first : início do laço
  */
 void adpt_parallel_for(
-    void (*kernel)(void*, size_t), void* data, size_t first, size_t last
+    void (*kernel)(void*, size_t), void* data, size_t first, size_t last, FILE* trace_file
 ){
     size_t nthr = omp_get_max_threads(); // número de threads
     worker_data_t* workers_data = malloc(nthr * sizeof(worker_data_t)); // Dados para os workers
 
 #ifdef ADPT_DEBUG
-    fprintf(stderr, "%.8lf ============ STARTING ==============\n", omp_get_wtime());
+    fprintf(trace_file, "%.8lf,0,STARTING,0,0,0,0,Start\n", omp_get_wtime());
 #endif
     #pragma omp parallel shared(kernel, data, workers_data, nthr, first, last)
     {
@@ -268,9 +277,16 @@ void adpt_parallel_for(
 
         while(1){ // Itera enquanto houver trabalho a ser feito
             // Itera enquanto houver trabalho sequencial a ser feito
-            while (adpt_extract_seq(m_worker_data, &m_first, &m_last) > 0)
+            while (adpt_extract_seq(m_worker_data, &m_first, &m_last) > 0){
+#ifdef ADPT_DEBUG
+                double start_time = omp_get_wtime();
+#endif
                 for (size_t i = m_first; i < m_last; i++)
                     kernel(data, i);
+#ifdef ADPT_DEBUG
+                m_worker_data->history[m_worker_data->counter++] = (trace_t){start_time, omp_get_wtime(), WORK, m_first, m_last, 0, 0};
+#endif
+            }
             
             // Tenta roubar trabalho, se não conseguir, sai do laço
             if (!adpt_extract_par(m_worker_data, workers_data, nthr))
@@ -282,22 +298,12 @@ void adpt_parallel_for(
     }
 
 #ifdef ADPT_DEBUG
+    char names[6][20] = {"extract_seq", "extract_par", "conflict", "work", "locked_extract_seq", "no_par_work"};
     for (size_t i=0; i<nthr; i++)
         for (size_t j=0; j<workers_data[i].counter; j++) {
             trace_t trace = workers_data[i].history[j];
-            if (trace.type == 's')
-                fprintf(stderr, "%.8lf [Worker %lu] seq %lu a %lu (%lu)\n", trace.time, i, trace.f, trace.l, trace.wl);
-            else if (trace.type == 'p')
-                fprintf(stderr, "%.8lf [Worker %lu] PAR %lu a %lu de %d\n", trace.time, i, trace.f, trace.l, trace.vid);
-            else if (trace.type == 'x')
-                fprintf(stderr, "%.8lf [Worker %lu] conflict seq\n", trace.time, i);
-            else if (trace.type == 'c')
-                fprintf(stderr, "%.8lf [Worker %lu] conflict PAR %lu a %lu de %d\n", trace.time, i, trace.f, trace.l, trace.vid);
-            else if (trace.type == 'l')
-                fprintf(stderr, "%.8lf [Worker %lu] lock PAR %d\n", trace.time, i, trace.vid);
-            else //=='e'
-                fprintf(stderr, "%.8lf [Worker %lu] sem trabalho disponivel\n", trace.time, i);
-
+            fprintf(trace_file, "%.8lf,%lu,%s,%lu,%lu,%lu,%d,Start\n",trace.start_time, i, names[trace.type], trace.f, trace.l, trace.wl, trace.vid);
+            fprintf(trace_file, "%.8lf,%lu,%s,%lu,%lu,%lu,%d,End\n",trace.end_time, i, names[trace.type], trace.f, trace.l, trace.wl, trace.vid);
         }
 #endif
 
